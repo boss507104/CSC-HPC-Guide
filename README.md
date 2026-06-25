@@ -22,8 +22,8 @@ The repository is organised into three functional directories:
 CSCEnvironmentHelpers/
 ├── SmartSimEnvironment/       # Configurations for SmartSim–JAX–OpenFOAM workflows (NumPy < 2.0.0)
 ├── MLEnvironment/             # Configurations for modern ML and chemical kinetics (NumPy >= 2.0.0)
-└── UsefulCommands/            # Production-ready SLURM templates and Allas data transfer scripts
-└── Utilities/ 
+├── UsefulCommands/            # Production-ready SLURM templates and Allas data transfer scripts
+└── Utilities/                 # Custom libraries and specialized repository tools
 
 ```
 
