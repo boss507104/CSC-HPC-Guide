@@ -71,7 +71,6 @@ echo "Configuration loaded for $CSC_PROJECT."
 | Package | Version | Purpose / Constraint |
 | --- | --- | --- |
 | **Python** | 3.11 | Tykky container engine foundation base layer. |
-| **jax[cuda12]** | 0.6.2 | Main array manipulation and automatic differentiation backend. |
 | **numpy** | $\ge$ 2.0.0 | Enabled next-generation vectorisation and performance features. |
 
 All secondary python packages resolve automatically to their latest compatible releases using `pip-compile`.
