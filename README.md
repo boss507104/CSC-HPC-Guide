@@ -1,4 +1,4 @@
-# CSC Pilot
+# CSC-Pilot
 
 Last updated: 25 June 2026
 
