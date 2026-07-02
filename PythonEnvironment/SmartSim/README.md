@@ -1,6 +1,6 @@
 # SmartSim Environment Configuration
 
-Last updated: 25 June 2026
+Last updated: 2 July 2026
 
 ---
 
@@ -127,6 +127,11 @@ nano -m extra4SmartSim.sh
 #!/bin/bash
 set -e
 
+# Redirect temporary caching layers to scratch to completely bypass $HOME storage quotas
+export TMPDIR="$CW_BUILD_TMPDIR"
+export PIP_CACHE_DIR="$CW_BUILD_TMPDIR/.pip_cache"
+mkdir -p "$PIP_CACHE_DIR"
+
 pip install --no-cache-dir pip-tools setuptools
 
 cat <<'IN' > requirements.in
@@ -244,8 +249,8 @@ IN
 python -m piptools compile --allow-unsafe requirements.in
 python -m pip install --no-cache-dir -r requirements.txt
 
-# Fetch and patch SmartSim client source directly to prevent explicit pointer mismatches
-cd /tmp
+# Fetch and patch SmartSim client source inside scratch space to fully eliminate file footprint overhead
+cd "$CW_BUILD_TMPDIR"
 rm -rf SmartRedis
 git clone https://github.com/boss507104/SmartRedis.git
 cd SmartRedis
@@ -265,7 +270,7 @@ export CPPFLAGS="$OLD_CPPFLAGS"
 export LDFLAGS="$OLD_LDFLAGS"
 
 cd /
-rm -rf /tmp/SmartRedis
+rm -rf "$CW_BUILD_TMPDIR/SmartRedis"
 
 export USE_SYSTEMD=no
 env CFLAGS="-Wno-incompatible-pointer-types" \
@@ -277,6 +282,9 @@ env CFLAGS="-Wno-incompatible-pointer-types" \
     CXXFLAGS="-Wno-incompatible-pointer-types" \
     USE_SYSTEMD=no \
     smart build --device cpu --skip-torch --skip-tensorflow
+
+# Clear residual file footprints immediately
+rm -rf "$PIP_CACHE_DIR"
 
 ```
 
@@ -299,7 +307,10 @@ If network limits delay package downloads, switch to `--partition=medium` to len
 
 ```bash
 module load tykky
+
+# Explicitly bind the isolated scratch subdirectory for build metadata masking
 export TMPDIR=$TMP_BUILD_DIR
+export CW_BUILD_TMPDIR=$TMP_BUILD_DIR
 
 conda-containerize new \
     --prefix $ENV_PREFIX \
@@ -457,16 +468,26 @@ cat <<EOF > $PYTHON_ROOT/update_tools.sh
 #!/bin/bash
 set -e
 
+# Mask environment properties during downstream patch iterations
+export TMPDIR="$CW_BUILD_TMPDIR"
+export PIP_CACHE_DIR="$CW_BUILD_TMPDIR/.pip_cache"
+
 echo "psutil" >> $PYTHON_ROOT/requirements.in
 
 pip-compile --allow-unsafe --reuse-hashes $PYTHON_ROOT/requirements.in
 pip install --no-cache-dir -r $PYTHON_ROOT/requirements.txt
+
+rm -rf "$PIP_CACHE_DIR"
 EOF
 
 ```
 
 ```bash
 module load tykky
+
+export TMPDIR=$TMP_BUILD_DIR
+export CW_BUILD_TMPDIR=$TMP_BUILD_DIR
+
 conda-containerize update \
     --post-install $PYTHON_ROOT/update_tools.sh \
     $ENV_PREFIX
@@ -484,7 +505,6 @@ Group multiple python dependencies inside a single update script to reduce runti
 * **Compiler Linkage Faults** — Verify host compiler environments explicitly using `module load gcc/13.1.0 cmake/3.28.6`.
 * **Incompatible Pointer Exceptions** — Ensure strict compiler masking flags (`-Wno-incompatible-pointer-types`) are set during step 1.
 
-
 ## SmartSim Deployment Track (Co-Processing Ecosystem)
 
 This module builds an isolated container architecture optimised for coupled multi-physics simulations, specifically interfacing parallel CFD solvers (e.g., OpenFOAM) with machine learning inference backends.
@@ -497,9 +517,10 @@ This module builds an isolated container architecture optimised for coupled mult
 While this folder provides the setup files required to compile and containerise the environment via Tykky, the complete reference architecture, SLURM templates, and machine learning graph injection models are maintained in a dedicated validation repository.
 
 For production-grade deployment strategies, please consult:
-🔗 **[SmartSim4CSC Reference Repository](https://github.com/boss507104/SmartSim4CSC)**
+🔗 **[SmartSim4CSC Reference Repository](https://www.google.com/search?q=https%3A%2F%2Fgithub.com%2Fboss507104%2FSmartSim4CSC)**
 
 #### Key Features Described in the Reference Repository:
+
 * **HPC Topology Optimisation:** Detailed blueprints for executing the Orchestrator within local node boundaries (utilising node-local `nvme` scratch space) or scaling across distributed **Mahti** compute nodes via high-speed interconnects.
 * **Physics-Informed Deep Learning:** Practical workflows demonstrating how to trace and serialise **JAX + Equinox** models into the immutable ONNX format, followed by real-time parallel graph submission and evaluation inside running OpenFOAM solver steps.
 * **SLURM Batch Manifests:** Production-ready `sbatch` profiles tailored for the CSC environment, minimising data-transfer latency between numerical grids and the Redis in-memory database.
