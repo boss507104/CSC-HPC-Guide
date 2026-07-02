@@ -168,7 +168,7 @@ srun --account=project_2015384 \
     --partition=interactive \
     --cpus-per-task=32 \
     --mem=62G \
-    --time=02:00:00 \
+    --time=09:00:00 \
     --pty bash
 ```
 
