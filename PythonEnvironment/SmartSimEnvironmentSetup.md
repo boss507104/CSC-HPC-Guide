@@ -298,8 +298,8 @@ chmod +x extra4SmartSim.sh
 Request an interactive session on a test node to execute the container packaging tools:
 
 ```bash
-srun --account=$CSC_PROJECT --partition=test --nodes=1 --ntasks=1 \
-     --cpus-per-task=16 --time=01:00:00 --pty bash
+srun --account=$CSC_PROJECT --partition=small --nodes=1 --ntasks=1 \
+     --cpus-per-task=16 --time=01:30:00 --pty bash
 
 ```
 
