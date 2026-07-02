@@ -130,7 +130,8 @@ set -e
 # Redirect temporary caching layers to scratch to completely bypass $HOME storage quotas
 export TMPDIR="$CW_BUILD_TMPDIR"
 export PIP_CACHE_DIR="$CW_BUILD_TMPDIR/.pip_cache"
-mkdir -p "$PIP_CACHE_DIR"
+export UV_CACHE_DIR="$CW_BUILD_TMPDIR/.uv_cache"
+mkdir -p "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
 
 # Install uv for fast, reliable dependency resolution
 pip install --no-cache-dir uv
@@ -286,7 +287,7 @@ env CFLAGS="-Wno-incompatible-pointer-types" \
     smart build --device cpu --skip-torch --skip-tensorflow
 
 # Clear residual file footprints immediately
-rm -rf "$PIP_CACHE_DIR"
+rm -rf "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
 ```
 
 ```bash
