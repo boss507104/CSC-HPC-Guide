@@ -40,8 +40,8 @@ Execute the following block to configure the project paths and environment name.
 ```bash
 # --- USER CONFIGURATION START ---
 export CSC_PROJECT="project_xxxxxxx"        # Your CSC project ID
-export PROJECT_USER_DIR="xxxxxxxx"          # Your directory under the CSC project
-export ENV_NICKNAME="NICKNAME"              # Desired environment name
+export PROJECT_USER_DIR="Harry"             # Your directory under the CSC project
+export ENV_NICKNAME="Dumbledore"            # Desired environment name
 # --- USER CONFIGURATION END ---
 
 # Derived paths
@@ -70,15 +70,18 @@ For example:
 
 ```bash
 export CSC_PROJECT="project_xxxxxxx"
-export PROJECT_USER_DIR="Hanseul"
-export ENV_NICKNAME="PentagonToy"
+export PROJECT_USER_DIR="Harry"
+export ENV_NICKNAME="Dumbledore"
 ```
 
 The resulting base path is:
 
 ```text
-/scratch/project_xxxxxxx/Hanseul/Utilities
+/scratch/project_xxxxxxx/Harry/Utilities
 ```
+
+> [!NOTE]
+> `Harry` and `Dumbledore` are fictional example placeholder values used for public documentation. Replace them with your actual project directory and preferred environment name.
 
 > [!NOTE]
 > `PROJECT_USER_DIR` is not necessarily the same as your CSC login username. It identifies the directory located directly under the CSC project scratch path.
@@ -988,6 +991,9 @@ Avoid running environment builds directly on a login node.
 ## Notes
 
 * The environment uses Python 3.12.
+* `Harry` and `Dumbledore` are fictional placeholder values used in the public documentation.
+* Replace `Harry` with the actual personal or shared directory under the CSC project.
+* Replace `Dumbledore` with the preferred environment nickname.
 * `PROJECT_USER_DIR` identifies the personal or shared directory directly under the CSC project scratch path.
 * `PROJECT_USER_DIR` is not necessarily the same as the CSC login username.
 * `requirements.in` contains the direct dependency specifications.
