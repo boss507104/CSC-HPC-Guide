@@ -285,7 +285,7 @@ tensorly
 
 # --- Custom Utilities ---
 DataGraph @ git+https://github.com/boss507104/DataGraph.git#subdirectory=DataGraph
-eqx_io @ git+https://github.com/boss507104/CSC-Pilot.git#subdirectory=Utilities/eqx4smartredis
+eqx_io @ git+https://github.com/boss507104/CSC-HPC-Guide.git#subdirectory=utilities/eqx4smartredis
 
 # --- Visualisation & UI ---
 cmocean
