@@ -14,6 +14,8 @@ This guide assumes that:
 2. The `roihu-cpu` SSH host has already been configured.
 3. `ssh roihu-cpu` connects successfully.
 
+> **Placeholder values:** Throughout this guide, `Harry` is used as a placeholder username (inspired by Harry Potter). Replace `Harry` with your actual CSC account username and `project_xxxxxxxx` with your own CSC project number wherever they appear.
+
 The VS Code Tunnel connects to the Roihu CPU login node. Computational workloads run on a Slurm interactive compute node allocated from the VS Code terminal.
 
 ***
@@ -148,7 +150,7 @@ File → Open Folder
 For example:
 
 ```text
-/scratch/project_2015384/Hanseul
+/scratch/project_xxxxxxxx/Harry
 ```
 
 The VS Code editor and integrated terminal initially run on the Roihu login node.
@@ -164,7 +166,7 @@ Open an integrated terminal in the VS Code window connected to Roihu.
 Allocate a CPU interactive node:
 
 ```bash
-srun --account=project_2015384 \
+srun --account=project_xxxxxxxx \
     --partition=interactive \
     --cpus-per-task=32 \
     --mem=62G \
@@ -210,13 +212,13 @@ These values indicate that the interactive shell has 32 CPU cores and approximat
 After the shell has moved to the interactive compute node, load the required environment:
 
 ```bash
-source /scratch/project_2015384/Hanseul/Utilities/Python4ML.sh
+source /scratch/project_xxxxxxxx/Harry/Utilities/Python4ML.sh
 ```
 
 Move to the project directory:
 
 ```bash
-cd /scratch/project_2015384/Hanseul
+cd /scratch/project_xxxxxxxx/Harry
 ```
 
 Run the workload:
@@ -316,7 +318,7 @@ Remote Explorer → Tunnels → roihu-cpu-interactive
 From the integrated VS Code terminal:
 
 ```bash
-srun --account=project_2015384 \
+srun --account=project_xxxxxxxx \
     --partition=interactive \
     --cpus-per-task=32 \
     --mem=62G \
@@ -327,7 +329,7 @@ srun --account=project_2015384 \
 ### Step 6: Load the Environment and Run the Workload
 
 ```bash
-source /scratch/project_2015384/Hanseul/Utilities/Python4ML.sh
+source /scratch/project_xxxxxxxx/Harry/Utilities/Python4ML.sh
 python your_script.py
 ```
 
@@ -420,7 +422,7 @@ hostname
 If the terminal shows a login-node hostname, allocate an interactive node:
 
 ```bash
-srun --account=project_2015384 \
+srun --account=project_xxxxxxxx \
     --partition=interactive \
     --cpus-per-task=32 \
     --mem=62G \
