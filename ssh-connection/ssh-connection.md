@@ -30,18 +30,18 @@ Add the following entries:
 ```ssh
 Host roihu-cpu
     HostName roihu-cpu.csc.fi
-    User YOUR_CSC_USERNAME
+    User Harry
     IdentityFile ~/.ssh/id_ed25519
     IdentitiesOnly yes
 
 Host roihu-gpu
     HostName roihu-gpu.csc.fi
-    User YOUR_CSC_USERNAME
+    User Harry
     IdentityFile ~/.ssh/id_ed25519
     IdentitiesOnly yes
 ```
 
-Replace `YOUR_CSC_USERNAME` with your own CSC username.
+Replace `Harry` with your own CSC username.
 
 ---
 
@@ -225,7 +225,7 @@ ssh -vvv roihu-cpu
 ## 8. Notes
 
 - CSC SSH certificates expire periodically and must be regenerated with `csc-ssh-keys`.
-- Replace `YOUR_CSC_USERNAME` in `~/.ssh/config` with your own CSC username.
+- Replace `Harry` with your own CSC username in `~/.ssh/config`.
 - The SSH configuration cannot directly reuse the shell variable `CSC_USER`.
 - Keep the private key restricted to the owner with permission mode `600`.
 - `roihu-cpu` and `roihu-gpu` connect to login nodes. Computational workloads should run on Slurm-allocated compute nodes rather than directly on the login nodes.
