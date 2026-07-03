@@ -1,6 +1,6 @@
 # ML Environment Configuration
 
-Last updated: 2 July 2026
+Last updated: 3 July 2026
 
 ---
 
@@ -31,6 +31,9 @@ The direct package specifications in `requirements.in` intentionally avoid stric
 > [!NOTE]
 > `requirements.in` records the requested top-level packages, while `requirements.txt` records the exact direct and transitive versions selected by uv. Rebuilding from an unchanged committed `requirements.txt` preserves the resolved package set, subject to platform and package availability.
 
+> [!NOTE]
+> Roihu does not currently provide `miniforge`, `conda`, or `mamba` modules. Dependency compilation therefore uses the available `python/python` module, a temporary Python virtual environment, and uv. The Tykky container build itself remains independent of this temporary resolver environment.
+
 ---
 
 ## Global Configuration
@@ -49,6 +52,7 @@ export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
 export PYTHON_ROOT="$BASE_SCRATCH/Python"
 export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12"
 export TMP_BUILD_DIR="$BASE_SCRATCH/.tykky_runtime"
+export UV_RESOLVER_DIR="$TMP_BUILD_DIR/uv-resolver"
 
 # Initialise directories
 rm -rf "$ENV_PREFIX"
@@ -94,9 +98,11 @@ The resulting base path is:
     └── $PROJECT_USER_DIR/
         └── Utilities/                       # $BASE_SCRATCH
             ├── .tykky_runtime/              # $TMP_BUILD_DIR
+            │   └── uv-resolver/             # $UV_RESOLVER_DIR
             └── Python/                      # $PYTHON_ROOT
                 ├── base4ML.yml
                 ├── extra4ML.sh
+                ├── update4ML.sh
                 ├── requirements.in
                 ├── requirements.txt
                 └── envs/
@@ -113,7 +119,7 @@ The resulting base path is:
 | Package | Version Policy | Purpose |
 | --- | --- | --- |
 | **Python** | 3.12 | Base interpreter supplied through the Tykky Conda specification |
-| **uv** | Latest available during build | Python dependency resolution and installation |
+| **uv** | Latest available during dependency compilation and build | Python dependency resolution and installation |
 | **NumPy** | Compatible version selected by uv | Core numerical array backend |
 | **JAX** | Compatible CUDA 12 release selected by uv | Array programming and automatic differentiation |
 | **Equinox** | Compatible version selected by uv | Neural-network and PyTree framework for JAX |
@@ -329,7 +335,7 @@ chmod +x extra4ML.sh
 
 ## 2. Compile the Dependency Set
 
-Request an interactive compute node before resolving the package set.
+Request an interactive compute node before resolving the package set:
 
 ```bash
 srun --account="$CSC_PROJECT" \
@@ -341,46 +347,55 @@ srun --account="$CSC_PROJECT" \
     --pty bash
 ```
 
-Load Tykky:
+> [!NOTE]
+> If this command has already allocated a compute node, continue from the same terminal. Do not request a second interactive allocation from inside the first one.
+
+Load the Python module available on Roihu:
 
 ```bash
-module load tykky
+module load python/python
 ```
 
-Create a temporary Conda environment containing Python and uv:
+Verify the available Python interpreter:
 
 ```bash
-module load miniforge
+which python3
+python3 --version
 ```
 
-If the CSC system does not provide `miniforge`, use the available Conda-compatible module instead.
+> [!NOTE]
+> The Python interpreter used here only runs uv. The dependency target remains Python 3.12 because `uv pip compile` is called with `--python-version 3.12`.
 
-Create a temporary resolver environment:
+Create a temporary virtual environment under the scratch build directory:
 
 ```bash
-rm -rf "$TMP_BUILD_DIR/uv-resolver"
+rm -rf "$UV_RESOLVER_DIR"
 
-conda create \
-    --prefix "$TMP_BUILD_DIR/uv-resolver" \
-    --channel conda-forge \
-    --yes \
-    python=3.12 \
-    pip
+python3 -m venv "$UV_RESOLVER_DIR"
+source "$UV_RESOLVER_DIR/bin/activate"
 ```
 
-Activate the resolver environment:
+Verify that the temporary environment is active:
 
 ```bash
-source activate "$TMP_BUILD_DIR/uv-resolver"
+which python
+python --version
 ```
 
-Install uv:
+Upgrade pip and install uv:
 
 ```bash
+python -m pip install --upgrade pip
 python -m pip install --no-cache-dir uv
 ```
 
-Compile `requirements.in` into `requirements.txt`:
+Verify uv:
+
+```bash
+uv --version
+```
+
+Compile `requirements.in` into `requirements.txt` for Python 3.12:
 
 ```bash
 uv pip compile \
@@ -395,26 +410,36 @@ Inspect the resolved file:
 head -n 40 "$PYTHON_ROOT/requirements.txt"
 ```
 
+Verify that the resolved file is non-empty:
+
+```bash
+test -s "$PYTHON_ROOT/requirements.txt" && \
+    echo "requirements.txt was generated successfully."
+```
+
 Deactivate the temporary resolver environment:
 
 ```bash
-conda deactivate
+deactivate
 ```
 
-Remove it when no longer required:
+Remove the temporary resolver environment when it is no longer required:
 
 ```bash
-rm -rf "$TMP_BUILD_DIR/uv-resolver"
+rm -rf "$UV_RESOLVER_DIR"
 ```
 
 > [!NOTE]
 > Re-run this compilation step whenever you add, remove, or deliberately update packages in `requirements.in`.
 
+> [!NOTE]
+> The `python/python` module, temporary virtual environment, and uv installation are required only for compiling `requirements.txt`. They are not part of the final Tykky container.
+
 ---
 
 ## 3. Build the Tykky Container
 
-Request an interactive compute node before running the container build if you are not already inside one.
+Request an interactive compute node before running the container build if you are not already inside one:
 
 ```bash
 srun --account="$CSC_PROJECT" \
@@ -426,11 +451,15 @@ srun --account="$CSC_PROJECT" \
     --pty bash
 ```
 
+> [!NOTE]
+> Skip this allocation command when continuing inside the compute-node session used to compile `requirements.txt`.
+
 If package downloads or builds require more time, request a partition and time limit appropriate for the target CSC system.
 
-Load Tykky:
+Reset the module environment before loading Tykky:
 
 ```bash
+module purge
 module load tykky
 ```
 
@@ -451,6 +480,15 @@ ls -l \
     "$PYTHON_ROOT/extra4ML.sh" \
     "$PYTHON_ROOT/requirements.in" \
     "$PYTHON_ROOT/requirements.txt"
+```
+
+Verify that the resolved requirements file is non-empty:
+
+```bash
+test -s "$PYTHON_ROOT/requirements.txt" || {
+    echo "requirements.txt is missing or empty."
+    exit 1
+}
 ```
 
 Build the container:
@@ -656,6 +694,20 @@ Edit `requirements.in`:
 nano -m "$PYTHON_ROOT/requirements.in"
 ```
 
+Create the temporary uv resolver environment:
+
+```bash
+module load python/python
+
+rm -rf "$UV_RESOLVER_DIR"
+
+python3 -m venv "$UV_RESOLVER_DIR"
+source "$UV_RESOLVER_DIR/bin/activate"
+
+python -m pip install --upgrade pip
+python -m pip install --no-cache-dir uv
+```
+
 Recompile the dependency set:
 
 ```bash
@@ -663,6 +715,13 @@ uv pip compile \
     "$PYTHON_ROOT/requirements.in" \
     --output-file "$PYTHON_ROOT/requirements.txt" \
     --python-version 3.12
+```
+
+Deactivate and remove the resolver environment:
+
+```bash
+deactivate
+rm -rf "$UV_RESOLVER_DIR"
 ```
 
 Inspect the changes:
@@ -677,7 +736,7 @@ Rebuild or update the Tykky environment after confirming the resolved changes.
 
 ### Deliberately Refresh All Compatible Versions
 
-Re-run:
+Create and activate the temporary resolver environment as described above, then run:
 
 ```bash
 uv pip compile \
@@ -685,6 +744,13 @@ uv pip compile \
     --output-file "$PYTHON_ROOT/requirements.txt" \
     --python-version 3.12 \
     --upgrade
+```
+
+Deactivate and remove the resolver environment:
+
+```bash
+deactivate
+rm -rf "$UV_RESOLVER_DIR"
 ```
 
 This command allows uv to select newer compatible package versions.
@@ -719,9 +785,33 @@ nano -m "$PYTHON_ROOT/requirements.in"
 
 Add or remove the required packages.
 
-### 2. Recompile the Resolved Dependencies
+### 2. Create the Temporary Resolver Environment
 
-Activate or create a Python 3.12 environment containing uv, then run:
+Load the available Python module:
+
+```bash
+module load python/python
+```
+
+Create and activate the temporary environment:
+
+```bash
+rm -rf "$UV_RESOLVER_DIR"
+
+python3 -m venv "$UV_RESOLVER_DIR"
+source "$UV_RESOLVER_DIR/bin/activate"
+```
+
+Install uv:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install --no-cache-dir uv
+```
+
+### 3. Recompile the Resolved Dependencies
+
+Run:
 
 ```bash
 uv pip compile \
@@ -740,7 +830,14 @@ uv pip compile \
     --upgrade
 ```
 
-### 3. Create the Update Script
+Deactivate and remove the resolver environment:
+
+```bash
+deactivate
+rm -rf "$UV_RESOLVER_DIR"
+```
+
+### 4. Create the Update Script
 
 Create `update4ML.sh`:
 
@@ -782,11 +879,12 @@ Make the script executable:
 chmod +x "$PYTHON_ROOT/update4ML.sh"
 ```
 
-### 4. Apply the Update
+### 5. Apply the Update
 
-Load Tykky:
+Reset the module environment and load Tykky:
 
 ```bash
+module purge
 module load tykky
 ```
 
@@ -835,14 +933,32 @@ Verify that the resolved dependency file exists:
 ls -l "$PYTHON_ROOT/requirements.txt"
 ```
 
+Verify that it is non-empty:
+
+```bash
+test -s "$PYTHON_ROOT/requirements.txt" || {
+    echo "requirements.txt is missing or empty."
+    exit 1
+}
+```
+
+Reset the module environment and load Tykky:
+
+```bash
+module purge
+module load tykky
+```
+
+Configure the Tykky build directories:
+
+```bash
+export TMPDIR="$TMP_BUILD_DIR"
+export CW_BUILD_TMPDIR="$TMP_BUILD_DIR"
+```
+
 Run the Tykky build again:
 
 ```bash
-module load tykky
-
-export TMPDIR="$TMP_BUILD_DIR"
-export CW_BUILD_TMPDIR="$TMP_BUILD_DIR"
-
 conda-containerize new \
     --prefix "$ENV_PREFIX" \
     --post-install "$PYTHON_ROOT/extra4ML.sh" \
@@ -855,6 +971,38 @@ The rebuild uses the exact package versions recorded in `requirements.txt`.
 
 ## Troubleshooting
 
+### `miniforge`, `conda`, or `mamba` Is Not Available
+
+Roihu may return errors such as:
+
+```text
+The following module(s) are unknown: "miniforge"
+Unable to find: "conda"
+Unable to find: "mamba"
+```
+
+This is expected on Roihu and does not indicate a Tykky problem.
+
+Use the available Python module instead:
+
+```bash
+module load python/python
+```
+
+Then create a standard virtual environment:
+
+```bash
+python3 -m venv "$UV_RESOLVER_DIR"
+source "$UV_RESOLVER_DIR/bin/activate"
+```
+
+Install uv inside that environment:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install --no-cache-dir uv
+```
+
 ### Total Environment Reset
 
 Remove the environment and temporary build directory:
@@ -865,7 +1013,7 @@ rm -rf "$TMP_BUILD_DIR"
 mkdir -p "$TMP_BUILD_DIR"
 ```
 
-Then repeat the container build.
+Then repeat dependency compilation and the container build.
 
 ### `requirements.txt` Does Not Exist
 
@@ -875,7 +1023,21 @@ Verify the direct dependency file:
 ls -l "$PYTHON_ROOT/requirements.in"
 ```
 
-Compile it:
+Create the temporary resolver environment:
+
+```bash
+module load python/python
+
+rm -rf "$UV_RESOLVER_DIR"
+
+python3 -m venv "$UV_RESOLVER_DIR"
+source "$UV_RESOLVER_DIR/bin/activate"
+
+python -m pip install --upgrade pip
+python -m pip install --no-cache-dir uv
+```
+
+Compile the resolved requirements:
 
 ```bash
 uv pip compile \
@@ -884,11 +1046,45 @@ uv pip compile \
     --python-version 3.12
 ```
 
-### uv Cannot Find the Active Environment
+Deactivate and remove the resolver:
 
-Confirm that the resolver or Tykky post-installation script runs inside a Python environment.
+```bash
+deactivate
+rm -rf "$UV_RESOLVER_DIR"
+```
 
-Inspect:
+### Python Virtual Environment Creation Fails
+
+Verify the loaded Python module:
+
+```bash
+module list
+which python3
+python3 --version
+```
+
+Reload the Roihu Python module:
+
+```bash
+module purge
+module load python/python
+```
+
+Retry:
+
+```bash
+python3 -m venv "$UV_RESOLVER_DIR"
+```
+
+If `python3` is unavailable but `python` exists, use:
+
+```bash
+python -m venv "$UV_RESOLVER_DIR"
+```
+
+### uv Cannot Be Installed
+
+Inspect the temporary environment:
 
 ```bash
 which python
@@ -896,15 +1092,42 @@ python --version
 python -m pip --version
 ```
 
-Install uv through the active Python interpreter:
+Upgrade pip:
+
+```bash
+python -m pip install --upgrade pip
+```
+
+Retry the uv installation:
 
 ```bash
 python -m pip install --no-cache-dir uv
 ```
 
+### uv Resolves for the Wrong Python Version
+
+The resolver environment Python version and target environment Python version do not need to be identical.
+
+Always include:
+
+```bash
+--python-version 3.12
+```
+
+For example:
+
+```bash
+uv pip compile \
+    "$PYTHON_ROOT/requirements.in" \
+    --output-file "$PYTHON_ROOT/requirements.txt" \
+    --python-version 3.12
+```
+
+The temporary Python environment runs uv, while `--python-version 3.12` defines the dependency-resolution target.
+
 ### Package Resolution Fails
 
-Run the compile command directly:
+Activate the temporary resolver environment and run:
 
 ```bash
 uv pip compile \
@@ -925,12 +1148,31 @@ Verify that the temporary directories point to scratch:
 echo "$TMPDIR"
 echo "$PIP_CACHE_DIR"
 echo "$UV_CACHE_DIR"
+echo "$UV_RESOLVER_DIR"
 ```
 
 They should point under:
 
 ```text
 $BASE_SCRATCH/.tykky_runtime
+```
+
+### Tykky Is Not Available After Loading the Python Module
+
+The Python resolver environment and Tykky build environment use different module configurations.
+
+Before building, reset the modules:
+
+```bash
+module purge
+module load tykky
+```
+
+Verify Tykky:
+
+```bash
+which conda-containerize
+conda-containerize --help
 ```
 
 ### JAX Reports That No GPU Is Available
@@ -996,13 +1238,17 @@ Avoid running environment builds directly on a login node.
 * Replace `Dumbledore` with the preferred environment nickname.
 * `PROJECT_USER_DIR` identifies the personal or shared directory directly under the CSC project scratch path.
 * `PROJECT_USER_DIR` is not necessarily the same as the CSC login username.
+* Roihu does not provide `miniforge`, `conda`, or `mamba` modules.
+* Use `module load python/python` and a temporary virtual environment to run uv.
+* The temporary resolver environment is separate from the final Tykky environment.
 * `requirements.in` contains the direct dependency specifications.
 * `requirements.txt` contains the exact direct and transitive versions resolved by uv.
 * Commit both dependency files when reproducible builds matter.
 * Recompile `requirements.txt` after changing `requirements.in`.
 * Use `--upgrade` only when intentionally refreshing compatible package versions.
+* Reset the module environment with `module purge` before loading Tykky after using the Python resolver module.
 * `jax[cuda12]` installs the CUDA 12-compatible JAX package set, but GPU execution still requires a GPU allocation and compatible host drivers.
 * The Tykky image should be treated as the deployed runtime unit.
-* Use batch or interactive compute nodes for environment builds and computational workloads.
+* Use batch or interactive compute nodes for dependency compilation, environment builds, and computational workloads.
 * Avoid performing large package installations directly on CSC login nodes.
 * Prefer a complete rebuild over repeated incremental updates when the dependency set changes substantially.
