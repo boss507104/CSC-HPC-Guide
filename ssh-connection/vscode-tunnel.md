@@ -176,7 +176,61 @@ exit
 
 ---
 
-## 6. Routine Workflow
+## 6. Optional: Shell Function Shortcut
+
+To simplify allocation and tunnel startup into a single command, create a helper function on Roihu.
+
+Create the directory for bash includes:
+
+```bash
+mkdir -p ~/.bashrc.d
+```
+
+Create the launcher script:
+
+```bash
+cat > ~/.bashrc.d/vscode-interactive.sh << 'EOF'
+# Slurm interactive allocation + VS Code tunnel launcher
+vscode-interactive() {
+    srun --account=project_xxxxxxxx \
+        --partition=interactive \
+        --cpus-per-task=32 \
+        --mem=62G \
+        --time=09:00:00 \
+        --pty ~/bin/code tunnel --accept-server-license-terms
+}
+EOF
+```
+
+Verify the script contents:
+
+```bash
+cat ~/.bashrc.d/vscode-interactive.sh
+```
+
+Reload the shell configuration:
+
+```bash
+source ~/.bashrc
+```
+
+Confirm the function is available:
+
+```bash
+type vscode-interactive
+```
+
+> Ensure `~/.bashrc` sources files from `~/.bashrc.d/`. If it does not, add a snippet to `~/.bashrc` that loops over and sources scripts in that directory.
+
+Once configured, allocate the node and start the tunnel in one step:
+
+```bash
+vscode-interactive
+```
+
+---
+
+## 7. Routine Workflow
 
 After the VS Code CLI has been installed, use the following commands for each session.
 
@@ -187,7 +241,7 @@ csc-ssh-keys
 ssh roihu-cpu
 ```
 
-**On the Roihu login node:**
+**On the Roihu login node (manual method):**
 
 ```bash
 srun --account=project_xxxxxxxx \
@@ -203,6 +257,12 @@ srun --account=project_xxxxxxxx \
 ```bash
 cd ~/bin
 ./code tunnel --accept-server-license-terms
+```
+
+**Or, using the shortcut (if configured, see Section 6):**
+
+```bash
+vscode-interactive
 ```
 
 **In local VS Code:**
@@ -226,10 +286,11 @@ exit
 
 ---
 
-## 7. Notes
+## 8. Notes
 
 - Start the VS Code Tunnel only after entering the Slurm interactive node.
 - Keep the original SSH terminal open while using VS Code.
 - The tunnel stops when the Slurm allocation ends.
 - The maximum CPU interactive allocation used in this guide is 32 CPU cores and 62 GiB of RAM.
 - Use batch jobs for long-running production workloads.
+- The `vscode-interactive` shell function combines Slurm allocation and tunnel startup into a single command for convenience.
