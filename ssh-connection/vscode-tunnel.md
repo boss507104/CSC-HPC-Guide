@@ -161,13 +161,17 @@ nvidia-smi
 From the allocated CPU compute node:
 
 ```bash
-~/bin/vscode-cli-x64/code tunnel --accept-server-license-terms
+~/bin/vscode-cli-x64/code tunnel \
+    --name roihu-cpu-interactive \
+    --accept-server-license-terms
 ```
 
 From the allocated GPU compute node:
 
 ```bash
-~/bin/vscode-cli-arm64/code tunnel --accept-server-license-terms
+~/bin/vscode-cli-arm64/code tunnel \
+    --name roihu-gpu-interactive \
+    --accept-server-license-terms
 ```
 
 During the first run:
@@ -182,17 +186,6 @@ During the first run:
 3. Sign in with the same GitHub account used in local VS Code.
 4. Enter the temporary device code shown in the Roihu terminal.
 5. Approve access for Visual Studio Code.
-6. Use one of the following tunnel names when prompted:
-
-   ```
-   roihu-cpu-interactive
-   ```
-
-   or:
-
-   ```
-   roihu-gpu-interactive
-   ```
 
 > Leave the tunnel process and SSH terminal running while using VS Code.
 
@@ -285,7 +278,9 @@ vscode-interactive-cpu() {
         --cpus-per-task=32 \
         --mem=62G \
         --time=09:00:00 \
-        --pty ~/bin/vscode-cli-x64/code tunnel --accept-server-license-terms
+        --pty ~/bin/vscode-cli-x64/code tunnel \
+            --name roihu-cpu-interactive \
+            --accept-server-license-terms
 }
 EOF
 ```
@@ -327,7 +322,9 @@ vscode-interactive-gpu() {
         --gpu \
         --cores 36 \
         --time 09:00:00 \
-        ~/bin/vscode-cli-arm64/code tunnel --accept-server-license-terms
+        ~/bin/vscode-cli-arm64/code tunnel \
+            --name roihu-gpu-interactive \
+            --accept-server-license-terms
 }
 EOF
 ```
@@ -393,7 +390,9 @@ srun --account=project_xxxxxxxx \
 **On the allocated CPU compute node, if using the manual method:**
 
 ```bash
-~/bin/vscode-cli-x64/code tunnel --accept-server-license-terms
+~/bin/vscode-cli-x64/code tunnel \
+    --name roihu-cpu-interactive \
+    --accept-server-license-terms
 ```
 
 **In local VS Code:**
@@ -430,7 +429,9 @@ sinteractive \
 **On the allocated GPU compute node, if using the manual method:**
 
 ```bash
-~/bin/vscode-cli-arm64/code tunnel --accept-server-license-terms
+~/bin/vscode-cli-arm64/code tunnel \
+    --name roihu-gpu-interactive \
+    --accept-server-license-terms
 ```
 
 **In local VS Code:**
