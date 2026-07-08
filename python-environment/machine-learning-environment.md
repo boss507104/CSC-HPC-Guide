@@ -488,9 +488,11 @@ export PYTHON_ROOT="$BASE_SCRATCH/Python"
 case "$(uname -m)" in
     x86_64)
         export ENV_ARCH="x64"
+        export KERNEL_ARCH="x86_64"
         ;;
     aarch64)
         export ENV_ARCH="arm64"
+        export KERNEL_ARCH="aarch64"
         ;;
     *)
         echo "Unsupported architecture: $(uname -m)"
@@ -502,6 +504,10 @@ export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
 
 # Tykky executable path
 export PATH="$ENV_PREFIX/bin:$PATH"
+
+# Jupyter kernel metadata
+export JUPYTER_KERNEL_NAME="$ENV_NICKNAME-ml-$KERNEL_ARCH"
+export JUPYTER_KERNEL_DISPLAY="Python 3.12 ($ENV_NICKNAME ML $KERNEL_ARCH)"
 
 # Prefer the JAX GPU backend by default
 export JAX_PLATFORMS="gpu"
@@ -995,7 +1001,7 @@ cat <<'EOF' > "$BASE_SCRATCH/Python4ML.sh"
 # Project configuration
 export CSC_PROJECT="project_xxxxxxx"
 export PROJECT_USER_DIR="Harry"
-export ENV_NICKNAME="Dumbledore"
+export ENV_NICKNAME="PentagonToy"
 
 # Derived paths
 export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
@@ -1005,9 +1011,11 @@ export PYTHON_ROOT="$BASE_SCRATCH/Python"
 case "$(uname -m)" in
     x86_64)
         export ENV_ARCH="x64"
+        export KERNEL_ARCH="x86_64"
         ;;
     aarch64)
         export ENV_ARCH="arm64"
+        export KERNEL_ARCH="aarch64"
         ;;
     *)
         echo "Unsupported architecture: $(uname -m)"
@@ -1019,6 +1027,10 @@ export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
 
 # Tykky executable path
 export PATH="$ENV_PREFIX/bin:$PATH"
+
+# Jupyter kernel metadata
+export JUPYTER_KERNEL_NAME="$ENV_NICKNAME-ml-$KERNEL_ARCH"
+export JUPYTER_KERNEL_DISPLAY="Python 3.12 ($ENV_NICKNAME ML $KERNEL_ARCH)"
 
 # Prefer the JAX GPU backend by default
 export JAX_PLATFORMS="gpu"
