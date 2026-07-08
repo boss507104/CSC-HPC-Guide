@@ -392,7 +392,7 @@ In local VS Code:
 ```text
 Remote Explorer → Tunnels → roihu-gpu-interactive
 ```
-
+ 
 ### When finished
 
 Stop the tunnel:
