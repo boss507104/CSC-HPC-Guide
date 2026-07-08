@@ -162,7 +162,7 @@ From the allocated CPU compute node:
 
 ```bash
 ~/bin/vscode-cli-x64/code tunnel \
-    --name roihu-cpu-interactive \
+    --name roihu-cpu-int \
     --accept-server-license-terms
 ```
 
@@ -170,7 +170,7 @@ From the allocated GPU compute node:
 
 ```bash
 ~/bin/vscode-cli-arm64/code tunnel \
-    --name roihu-gpu-interactive \
+    --name roihu-gpu-int \
     --accept-server-license-terms
 ```
 
@@ -202,13 +202,13 @@ On the local workstation:
 5. Select:
 
    ```
-   roihu-cpu-interactive
+   roihu-cpu-int
    ```
 
    or:
 
    ```
-   roihu-gpu-interactive
+   roihu-gpu-int
    ```
 
 Alternatively, open the Command Palette with **Command-Shift-P** and run:
@@ -279,7 +279,7 @@ vscode-interactive-cpu() {
         --mem=62G \
         --time=09:00:00 \
         --pty ~/bin/vscode-cli-x64/code tunnel \
-            --name roihu-cpu-interactive \
+            --name roihu-cpu-int \
             --accept-server-license-terms
 }
 EOF
@@ -323,7 +323,7 @@ vscode-interactive-gpu() {
         --cores 36 \
         --time 09:00:00 \
         ~/bin/vscode-cli-arm64/code tunnel \
-            --name roihu-gpu-interactive \
+            --name roihu-gpu-int \
             --accept-server-license-terms
 }
 EOF
