@@ -162,6 +162,7 @@ nvidia-smi
 From the allocated CPU compute node:
 
 ```bash
+export VSCODE_AGENT_FOLDER="$HOME/.vscode-server-x86_64"
 ~/bin/vscode-cli-x64/code tunnel \
     --name roihu-cpu-int \
     --accept-server-license-terms
@@ -170,6 +171,7 @@ From the allocated CPU compute node:
 From the allocated GPU compute node:
 
 ```bash
+export VSCODE_AGENT_FOLDER="$HOME/.vscode-server-aarch64"
 ~/bin/vscode-cli-arm64/code tunnel \
     --name roihu-gpu-int \
     --accept-server-license-terms
@@ -348,6 +350,7 @@ Create the CPU launcher script on `roihu-cpu`:
 cat > ~/.bashrc.d/vscode-interactive-cpu.sh << 'EOF_CPU'
 # Slurm CPU interactive allocation + VS Code tunnel launcher
 vscode-interactive-cpu() {
+    VSCODE_AGENT_FOLDER="$HOME/.vscode-server-x86_64" \
     srun --account=project_xxxxxxxx \
         --partition=interactive \
         --cpus-per-task=32 \
@@ -392,6 +395,7 @@ Create the GPU launcher script on `roihu-gpu`:
 cat > ~/.bashrc.d/vscode-interactive-gpu.sh << 'EOF_GPU'
 # Slurm GPU interactive allocation + VS Code tunnel launcher
 vscode-interactive-gpu() {
+    VSCODE_AGENT_FOLDER="$HOME/.vscode-server-aarch64" \
     sinteractive \
         --account project_xxxxxxxx \
         --gpu \
@@ -465,6 +469,7 @@ srun --account=project_xxxxxxxx \
 **On the allocated CPU compute node, if using the manual method:**
 
 ```bash
+export VSCODE_AGENT_FOLDER="$HOME/.vscode-server-x86_64"
 ~/bin/vscode-cli-x64/code tunnel \
     --name roihu-cpu-int \
     --accept-server-license-terms
@@ -504,6 +509,7 @@ sinteractive \
 **On the allocated GPU compute node, if using the manual method:**
 
 ```bash
+export VSCODE_AGENT_FOLDER="$HOME/.vscode-server-aarch64"
 ~/bin/vscode-cli-arm64/code tunnel \
     --name roihu-gpu-int \
     --accept-server-license-terms
@@ -604,3 +610,4 @@ exit
 - Use batch jobs for long-running production workloads.
 - The `vscode-interactive-cpu` shell function combines CPU allocation and tunnel startup into a single command.
 - The `vscode-interactive-gpu` shell function combines GPU allocation and tunnel startup into a single command.
+- CPU and GPU tunnel sessions should use separate VS Code server folders through `VSCODE_AGENT_FOLDER` to avoid sharing x64 and ARM64 remote extension binaries on the shared Roihu filesystem.
