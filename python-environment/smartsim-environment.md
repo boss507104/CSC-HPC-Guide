@@ -1,6 +1,6 @@
 # SmartSim Environment Configuration
 
-Last updated: 8 July 2026
+Last updated: 9 July 2026
 
 ---
 
@@ -68,6 +68,8 @@ SmartRedis Python client
 SmartRedis native library
     Built outside Tykky for direct linkage with OpenFOAM, C++, and Fortran solvers.
 ```
+
+SmartSim is installed only after the patched SmartRedis Python client is available. This avoids the ARM64 build failure caused by `smartsim==0.8.0` trying to pull the incomplete PyPI `smartredis==0.6.1` source distribution before the patched source version has been installed.
 
 The SmartSim database build installs its own ONNX-related Python dependencies. The installation script therefore reapplies `requirements.in` after `smart build` to restore the required `onnx==1.17.0` version before running the final dependency check.
 
@@ -434,6 +436,8 @@ tabulate
 typing-extensions
 ```
 
+Do not add `smartsim==0.8.0` to `requirements.in`. SmartSim is installed separately in `extra4SmartSim.sh` after the patched SmartRedis Python client has been installed.
+
 ### 1.3 Create the Post-Installation Script
 
 Create `extra4SmartSim.sh`:
@@ -531,7 +535,8 @@ uv pip install \
 # Verify the final installed dependency relationships
 uv pip check
 
-# Record the installed package versions
+# Record the installed package versions.
+# SmartRedis and SmartSim are installed separately and are not used as replay inputs.
 python -m pip list \
     --format=freeze \
     | grep -v '^smartredis==' \
@@ -552,7 +557,7 @@ onnx>=1.17.0,<1.19.0
 
 The explicit `onnx==1.17.0` constraint restores a version compatible with both `jax2onnx` and the pinned `protobuf==3.20.3` stack.
 
-The locally patched SmartRedis Python client is deliberately excluded from `requirements.txt`. It is installed separately from the SmartRedis source repository during every build.
+The locally patched SmartRedis Python client and SmartSim itself are deliberately excluded from `requirements.txt`. They are installed separately during every build.
 
 Make the script executable:
 
@@ -664,9 +669,9 @@ ls -lh "$PYTHON_ROOT/requirements.txt"
 Inspect the critical installed versions:
 
 ```bash
-grep -E \
-    '^(jax|numpy|onnx|protobuf|smartsim)==' \
-    "$PYTHON_ROOT/requirements.txt"
+python -m pip list \
+    --format=freeze \
+    | grep -E '^(jax|numpy|onnx|protobuf|smartsim|smartredis)==' 
 ```
 
 The expected ONNX version is:
@@ -1157,6 +1162,8 @@ onnx==1.17.0
 protobuf==3.20.3
 ```
 
+SmartSim and SmartRedis are installed separately in `extra4SmartSim.sh`.
+
 The Python and CMake constraints remain in `base4SmartSim.yml`:
 
 ```text
@@ -1166,7 +1173,7 @@ cmake<3.30.0
 
 ### Reproduce an Existing Installed Package Set
 
-A previously generated `requirements.txt` records the package versions installed in that environment.
+A previously generated `requirements.txt` records the package versions installed in that environment, excluding SmartSim and SmartRedis.
 
 To reproduce those versions, temporarily replace both dependency installation commands in `extra4SmartSim.sh`:
 
@@ -1184,7 +1191,7 @@ uv pip install \
     --requirements "$PYTHON_ROOT/requirements.txt"
 ```
 
-The patched SmartRedis Python client must still be installed separately from its source repository.
+The patched SmartRedis Python client and SmartSim must still be installed separately from the source steps in `extra4SmartSim.sh`.
 
 For ordinary development builds, continue using `requirements.in`.
 
@@ -1200,7 +1207,7 @@ Edit:
 nano -m "$PYTHON_ROOT/requirements.in"
 ```
 
-Preserve the SmartSim compatibility constraints.
+Preserve the compatibility constraints.
 
 ### 2. Create the Update Script
 
@@ -1295,7 +1302,8 @@ uv pip install \
 # Verify the final installed dependency relationships
 uv pip check
 
-# Record the updated installed package versions
+# Record the updated installed package versions.
+# SmartRedis and SmartSim are installed separately and are not used as replay inputs.
 python -m pip list \
     --format=freeze \
     | grep -v '^smartredis==' \
@@ -1606,6 +1614,8 @@ export SMARTSIM_DB_FILE_PARSE_TRIALS=600
 
 export JUPYTER_KERNEL_NAME="$ENV_NICKNAME-smartsim-$KERNEL_ARCH"
 export JUPYTER_KERNEL_DISPLAY="Python 3.11 ($ENV_NICKNAME SmartSim $KERNEL_ARCH)"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share/$KERNEL_ARCH}"
+export JUPYTER_KERNEL_DIR="$XDG_DATA_HOME/jupyter/kernels/$JUPYTER_KERNEL_NAME"
 
 case "$ENV_ARCH" in
     x64)
@@ -1710,7 +1720,24 @@ onnx==1.17.0
 protobuf==3.20.3
 ```
 
+Do not add `smartsim==0.8.0` to `requirements.in`. SmartSim is installed separately after the patched SmartRedis Python client has been installed.
+
 Repeat the build after correcting the conflicting dependency.
+
+### SmartRedis PyPI Source Build Fails on ARM64
+
+If the ARM64 build tries to build PyPI `smartredis==0.6.1` and fails with missing CMake files such as:
+
+```text
+include could not find requested file:
+  EnableCoverage
+
+Config.smartredis.cmake.in does not exist
+```
+
+then `smartsim==0.8.0` is probably being installed too early through `requirements.in`.
+
+Keep `smartsim==0.8.0` out of `requirements.in`. The post-installation script must install the patched SmartRedis Python client first and install SmartSim only afterwards.
 
 ### `jax2onnx` Reports an Incompatible ONNX Version
 
@@ -2002,14 +2029,15 @@ The complete production architecture, Slurm templates, database placement strate
 * `PROJECT_USER_DIR` is not necessarily the same as the CSC login username.
 * Dependency resolution and installation run inside the Tykky Python 3.11 environment.
 * No external Conda, Miniforge, Mamba, Python module, resolver environment, or virtual environment is required.
-* `requirements.in` contains the direct dependencies and SmartSim compatibility constraints.
-* `requirements.txt` records the package versions installed during the build.
+* `requirements.in` contains the direct dependencies and compatibility constraints, but not SmartSim itself.
+* `requirements.txt` records package versions installed during the build, excluding SmartSim and SmartRedis.
 * `requirements.txt` is an installed-state snapshot rather than a separately compiled lockfile.
 * New builds from `requirements.in` may install newer compatible versions of unconstrained packages.
 * Use a previously generated `requirements.txt` when the same installed package versions must be reconstructed.
 * The patched SmartRedis Python client is installed separately from its source repository.
-* The SmartRedis Python client is excluded from `requirements.txt`.
-* Preserve the SmartSim, JAX, ONNX, NumPy, protobuf, Python, and CMake compatibility constraints.
+* SmartSim is installed separately after the patched SmartRedis Python client.
+* SmartRedis and SmartSim are excluded from `requirements.txt`.
+* Preserve the JAX, ONNX, NumPy, protobuf, Python, and CMake compatibility constraints.
 * `onnx==1.17.0` satisfies the `jax2onnx` requirement while remaining compatible with the pinned protobuf stack.
 * The SmartSim database build may temporarily install `onnx==1.15.0`.
 * The dependency set must therefore be reapplied after `smart build`.
