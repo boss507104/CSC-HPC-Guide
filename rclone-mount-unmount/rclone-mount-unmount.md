@@ -338,7 +338,7 @@ cat >> "$HOME/.zshrc" <<'EOF'
 # ================================================================
 
 # --- USER CONFIGURATION START ---
-export CSC_USER="xxxxxxxx"                  # Your CSC username
+export CSC_USER="username"                  # Your CSC username
 export CSC_PROJECT="project_xxxxxxx"        # Your CSC project ID
 export CSC_PROJECT_DIR="xxxxxxxx"           # Your directory under the project
 # --- USER CONFIGURATION END ---
@@ -419,6 +419,10 @@ unmount-roihu() {
 
     echo "Roihu has been unmounted."
 }
+
+# Alias using the standard Unix-style spelling
+alias umount-roihu="unmount-roihu"
+
 EOF
 ```
 
