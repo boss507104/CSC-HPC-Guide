@@ -389,7 +389,6 @@ cantera
 foamlib
 meshio
 protobuf==3.20.3
-smartsim==0.8.0
 
 # --- Mathematical Tools ---
 numba
@@ -500,6 +499,11 @@ export CFLAGS="$OLD_CFLAGS"
 export CXXFLAGS="$OLD_CXXFLAGS"
 export CPPFLAGS="$OLD_CPPFLAGS"
 export LDFLAGS="$OLD_LDFLAGS"
+
+# Install SmartSim after the patched SmartRedis Python client is available
+uv pip install \
+    --link-mode=copy \
+    smartsim==0.8.0
 
 # Build the SmartSim database dependencies without unused ML backends
 export USE_SYSTEMD=no
@@ -641,11 +645,12 @@ During the build, Tykky performs these operations:
 3. Installs uv.
 4. Resolves and installs the packages listed in requirements.in.
 5. Installs the patched SmartRedis Python client.
-6. Builds the SmartSim database dependencies.
-7. Restores the package versions specified in requirements.in.
-8. Verifies the final installed dependency relationships.
-9. Records the installed package versions in requirements.txt.
-10. Packages the completed environment into the Tykky image.
+6. Installs SmartSim 0.8.0 after SmartRedis is already available.
+7. Builds the SmartSim database dependencies.
+8. Restores the package versions specified in requirements.in.
+9. Verifies the final installed dependency relationships.
+10. Records the installed package versions in requirements.txt.
+11. Packages the completed environment into the Tykky image.
 ```
 
 After the build completes:
@@ -1149,7 +1154,6 @@ numpy<2.0.0
 jax[cuda12]==0.6.2
 onnx==1.17.0
 protobuf==3.20.3
-smartsim==0.8.0
 ```
 
 The Python and CMake constraints remain in `base4SmartSim.yml`:
@@ -1258,6 +1262,11 @@ export CFLAGS="$OLD_CFLAGS"
 export CXXFLAGS="$OLD_CXXFLAGS"
 export CPPFLAGS="$OLD_CPPFLAGS"
 export LDFLAGS="$OLD_LDFLAGS"
+
+# Install SmartSim after the patched SmartRedis Python client is available
+uv pip install \
+    --link-mode=copy \
+    smartsim==0.8.0
 
 # Rebuild the SmartSim database dependencies
 export USE_SYSTEMD=no
