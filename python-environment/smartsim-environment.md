@@ -6,7 +6,9 @@ Last updated: 9 July 2026
 
 ## Overview & Motivation
 
-This folder contains configurations for deploying a reliable, high-performance runtime stack containing **SmartSim 0.8.0 + SmartRedis 0.6.1** on CSC supercomputers (**Puhti / Mahti / Roihu**). The setup focuses on coupling **JAX + Equinox + ONNX** models with parallel OpenFOAM solvers.
+This folder contains configurations for deploying a reliable, high-performance runtime stack containing **SmartSim 0.8.0 + SmartRedis 0.6.1** on CSC supercomputers (**Puhti / Mahti / Roihu**). The setup focuses on coupling **JAX + Equinox** workflows with SmartSim/SmartRedis and parallel OpenFOAM solvers.
+
+SmartRedis is used primarily for exchanging tensors, model weights, metrics, and predictions between solver, producer, consumer, and monitoring processes. Model execution is performed by external Python/JAX worker processes rather than by RedisAI inside the database. ONNX tooling may still be installed for optional export or offline conversion workflows, but RedisAI, ONNXRuntime, PyTorch, and TensorFlow backends are not built in the default workflow.
 
 Instead of deploying traditional Conda or pip environments directly on the parallel filesystem, we use **Tykky** to package the Python stack inside a single-file container image. This design reduces the Lustre parallel filesystem degradation caused by thousands of small metadata operations during Python package imports.
 
@@ -32,17 +34,18 @@ This configuration uses **uv** inside the Tykky build environment to resolve and
 * **Post-Installation Validation** — `uv pip check` verifies the installed dependency relationships.
 * **Explicit Copy Mode** — `--link-mode=copy` avoids unsupported hardlink operations between the uv cache and the temporary Tykky environment.
 
-The direct package specifications in `requirements.in` contain the SmartSim-specific compatibility constraints:
+The direct package specifications in `requirements.in` contain the shared scientific-Python compatibility constraints. SmartSim and the patched SmartRedis Python client are installed separately by the post-installation script.
 
 ```text
 Python       3.11
-SmartSim     0.8.0
-SmartRedis   0.6.1-compatible source
+SmartSim     0.8.0, installed separately
+SmartRedis   0.6.1-compatible patched source
 JAX          0.6.2
-ONNX         1.17.0
+ONNX         1.17.0, optional tooling
 NumPy        < 2.0.0
 protobuf     3.20.3
 CMake        < 3.30.0
+RedisAI      not built in the default workflow
 ```
 
 The dependency files have different roles:
@@ -71,9 +74,9 @@ SmartRedis native library
 
 SmartSim is installed only after the patched SmartRedis Python client is available. This avoids the ARM64 build failure caused by `smartsim==0.8.0` trying to pull the incomplete PyPI `smartredis==0.6.1` source distribution before the patched source version has been installed.
 
-The SmartSim database build installs its own ONNX-related Python dependencies. The installation script therefore reapplies `requirements.in` after `smart build` to restore the required `onnx==1.17.0` version before running the final dependency check.
+The default build skips RedisAI and ML backends. This is sufficient for SmartSim orchestration, Redis database startup, SmartRedis tensor exchange, and external Python/JAX inference workers. The installation script still reapplies `requirements.in` after `smart build` as a conservative restoration step before running the final dependency check.
 
-This configuration forms part of the [CSC Environment Helpers Framework](https://github.com/boss507104/CSCEnvironmentHelpers). Production examples for coupling SmartSim, SmartRedis, OpenFOAM, JAX, and ONNX are maintained in the [SmartSim4CSC repository](https://github.com/boss507104/SmartSim4CSC).
+This configuration forms part of the [CSC Environment Helpers Framework](https://github.com/boss507104/CSCEnvironmentHelpers). Production examples for coupling SmartSim, SmartRedis, OpenFOAM, and JAX are maintained in the [SmartSim4CSC repository](https://github.com/boss507104/SmartSim4CSC).
 
 ---
 
@@ -270,13 +273,15 @@ The resulting ARM64 environment path is:
 | --- | --- | --- |
 | **Python** | 3.11 | Base interpreter created by Tykky |
 | **uv** | Latest available during the build | Dependency resolution, installation, and validation |
-| **SmartSim** | 0.8.0 | Orchestration framework and database lifecycle management |
-| **SmartRedis** | 0.6.1-compatible source | Python client and native C++/Fortran client library |
-| **JAX** | 0.6.2 with CUDA 12 support | Array programming and automatic differentiation |
-| **ONNX** | 1.17.0 | Compatible with `jax2onnx` and the pinned protobuf stack |
+| **SmartSim** | 0.8.0 | Orchestration framework and Redis database lifecycle management |
+| **SmartRedis** | 0.6.1-compatible patched source | Python client and native C++/Fortran client library |
+| **JAX** | 0.6.2 with CUDA 12 support | Array programming, automatic differentiation, training, and inference |
+| **Equinox** | Resolved by uv | JAX-native neural-network model definitions |
+| **ONNX** | 1.17.0 | Optional export or conversion tooling; not used by the default Redis-only runtime path |
 | **NumPy** | `< 2.0.0` | Compatibility constraint required by the SmartSim stack |
 | **protobuf** | 3.20.3 | Compatibility layer used by SmartSim and ONNX tooling |
 | **CMake** | `< 3.30.0` | SmartRedis and SmartSim native build compatibility |
+| **RedisAI / ML backends** | Not built by default | Required only for database-side `set_model` / `run_model` workflows |
 
 ---
 
@@ -509,20 +514,20 @@ uv pip install \
     --link-mode=copy \
     smartsim==0.8.0
 
-# Patch SmartSim architecture detection for Roihu ARM64 nodes
+# Patch SmartSim architecture detection and add Linux ARM64 CPU config
 python - <<'PY'
 from pathlib import Path
+import json
 import smartsim
 
 smartsim_root = Path(smartsim.__file__).resolve().parent
-platform_file = smartsim_root / "_core" / "_install" / "platform.py"
 
+# Map Linux aarch64 to SmartSim's canonical ARM64 architecture name
+platform_file = smartsim_root / "_core" / "_install" / "platform.py"
 text = platform_file.read_text()
 
-# Remove the previous wrong patch if it exists
 text = text.replace('    AARCH64 = "aarch64"\n', '')
 
-# Map Linux aarch64 to SmartSim's existing arm64 architecture name
 if 'if string == "aarch64":' not in text:
     text = text.replace(
         '        return cls(string)\n',
@@ -534,9 +539,25 @@ if 'if string == "aarch64":' not in text:
 
 platform_file.write_text(text)
 print(f"Patched SmartSim platform file: {platform_file}")
+
+# Add a minimal Linux ARM64 CPU platform config for Redis-only builds
+config_dir = smartsim_root / "_core" / "_install" / "configs" / "mlpackages"
+config_file = config_dir / "linux-arm64-cpu.json"
+
+config = {
+    "platform": {
+        "operating_system": "linux",
+        "architecture": "arm64",
+        "device": "cpu"
+    },
+    "ml_packages": []
+}
+
+config_file.write_text(json.dumps(config, indent=4) + "\n")
+print(f"Wrote SmartSim Linux ARM64 CPU config: {config_file}")
 PY
 
-# Build the SmartSim database dependencies without unused ML backends
+# Build only the SmartSim database executable, without RedisAI or ML backends
 export USE_SYSTEMD=no
 
 env \
@@ -551,8 +572,8 @@ env \
     USE_SYSTEMD=no \
     smart build \
         --device cpu \
-        --skip-torch \
-        --skip-tensorflow
+        --skip-backends \
+        --skip-python-packages
 
 # Restore packages modified by the SmartSim database build
 uv pip install \
@@ -576,13 +597,18 @@ rm -rf "$CW_BUILD_TMPDIR/SmartRedis"
 rm -rf "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
 ```
 
-The second `uv pip install` restores packages changed by `smart build`. In particular, the SmartSim ONNX backend may install `onnx==1.15.0`, while `jax2onnx` requires:
+The second `uv pip install` restores the requested Python package set after `smart build`.
+
+The default SmartSim build intentionally skips RedisAI and ML backends:
 
 ```text
-onnx>=1.17.0,<1.19.0
+--skip-backends
+--skip-python-packages
 ```
 
-The explicit `onnx==1.17.0` constraint restores a version compatible with both `jax2onnx` and the pinned `protobuf==3.20.3` stack.
+This is sufficient for workflows where SmartRedis is used for tensor, weight, metric, and prediction exchange, while JAX/Equinox training and inference are executed by external Python producer or consumer processes.
+
+The explicit `onnx==1.17.0` constraint is kept for optional ONNX export or conversion tooling, not for RedisAI execution inside the database.
 
 The locally patched SmartRedis Python client and SmartSim itself are deliberately excluded from `requirements.txt`. They are installed separately during every build.
 
@@ -679,11 +705,13 @@ During the build, Tykky performs these operations:
 4. Resolves and installs the packages listed in requirements.in.
 5. Installs the patched SmartRedis Python client.
 6. Installs SmartSim 0.8.0 after SmartRedis is already available.
-7. Builds the SmartSim database dependencies.
-8. Restores the package versions specified in requirements.in.
-9. Verifies the final installed dependency relationships.
-10. Records the installed package versions in requirements.txt.
-11. Packages the completed environment into the Tykky image.
+7. Patches SmartSim Linux aarch64 detection to use SmartSim's internal arm64 label.
+8. Adds a minimal Linux ARM64 CPU SmartSim platform config for Redis-only builds.
+9. Builds the SmartSim database executable without RedisAI or ML backends.
+10. Restores the package versions specified in requirements.in.
+11. Verifies the final installed dependency relationships.
+12. Records the installed package versions in requirements.txt.
+13. Packages the completed environment into the Tykky image.
 ```
 
 After the build completes:
@@ -698,7 +726,7 @@ Inspect the critical installed versions:
 ```bash
 python -m pip list \
     --format=freeze \
-    | grep -E '^(jax|numpy|onnx|protobuf|smartsim|smartredis)==' 
+    | grep -E '^(jax|numpy|onnx|protobuf|smartsim|smartredis)=='
 ```
 
 The expected ONNX version is:
@@ -1089,7 +1117,7 @@ Run the SmartSim integrity diagnostic:
 smart validate --device cpu
 ```
 
-Missing PyTorch or TensorFlow backends are expected because the SmartSim database build deliberately excludes them.
+Missing RedisAI, ONNXRuntime, PyTorch, or TensorFlow backends are expected because the default build deliberately skips RedisAI and all ML backends. This configuration validates the Redis database executable and SmartSim/SmartRedis orchestration path, not RedisAI model execution.
 
 Inspect the installed package versions:
 
@@ -1132,7 +1160,7 @@ find "$SMARTREDIS_DIR/install/share/cmake" \
     | sort
 ```
 
-To validate the complete data path, run a JAX to ONNX to SmartRedis graph submission test on a compute node.
+To validate the complete data path, run a SmartSim/SmartRedis tensor-exchange test on a compute node. For the default workflow, the model should execute in a Python/JAX producer or consumer process rather than inside RedisAI.
 
 ---
 
@@ -1142,7 +1170,7 @@ The dependency files serve different purposes:
 
 ```text
 requirements.in
-    Human-maintained direct dependencies and SmartSim compatibility constraints.
+    Human-maintained direct dependencies and compatibility constraints.
 
 requirements.txt
     Installed package versions recorded after a successful build.
@@ -1303,20 +1331,20 @@ uv pip install \
     --link-mode=copy \
     smartsim==0.8.0
 
-# Patch SmartSim architecture detection for Roihu ARM64 nodes
+# Patch SmartSim architecture detection and add Linux ARM64 CPU config
 python - <<'PY'
 from pathlib import Path
+import json
 import smartsim
 
 smartsim_root = Path(smartsim.__file__).resolve().parent
-platform_file = smartsim_root / "_core" / "_install" / "platform.py"
 
+# Map Linux aarch64 to SmartSim's canonical ARM64 architecture name
+platform_file = smartsim_root / "_core" / "_install" / "platform.py"
 text = platform_file.read_text()
 
-# Remove the previous wrong patch if it exists
 text = text.replace('    AARCH64 = "aarch64"\n', '')
 
-# Map Linux aarch64 to SmartSim's existing arm64 architecture name
 if 'if string == "aarch64":' not in text:
     text = text.replace(
         '        return cls(string)\n',
@@ -1328,9 +1356,25 @@ if 'if string == "aarch64":' not in text:
 
 platform_file.write_text(text)
 print(f"Patched SmartSim platform file: {platform_file}")
+
+# Add a minimal Linux ARM64 CPU platform config for Redis-only builds
+config_dir = smartsim_root / "_core" / "_install" / "configs" / "mlpackages"
+config_file = config_dir / "linux-arm64-cpu.json"
+
+config = {
+    "platform": {
+        "operating_system": "linux",
+        "architecture": "arm64",
+        "device": "cpu"
+    },
+    "ml_packages": []
+}
+
+config_file.write_text(json.dumps(config, indent=4) + "\n")
+print(f"Wrote SmartSim Linux ARM64 CPU config: {config_file}")
 PY
 
-# Rebuild the SmartSim database dependencies
+# Rebuild only the SmartSim database executable, without RedisAI or ML backends
 export USE_SYSTEMD=no
 
 env \
@@ -1345,8 +1389,8 @@ env \
     USE_SYSTEMD=no \
     smart build \
         --device cpu \
-        --skip-torch \
-        --skip-tensorflow
+        --skip-backends \
+        --skip-python-packages
 
 # Restore packages modified by the SmartSim database build
 uv pip install \
@@ -1521,7 +1565,7 @@ conda-containerize new \
     "$PYTHON_ROOT/base4SmartSim.yml"
 ```
 
-The rebuild resolves the dependency set from `requirements.in`, restores packages modified by `smart build`, validates the final environment, and records the installed versions in `requirements.txt`.
+The rebuild resolves the dependency set from `requirements.in`, builds the SmartSim database executable without RedisAI or ML backends, restores the requested Python package set, validates the final environment, and records the installed versions in `requirements.txt`.
 
 ### 9. Rebuild the SmartRedis Native Library
 
@@ -1622,95 +1666,7 @@ conda-containerize new \
 
 Build the SmartRedis native library using the compiler modules for the target CSC system.
 
-Create the architecture-aware loader:
-
-```bash
-cat <<'EOF' > "$BASE_SCRATCH/Python4SmartSim.sh"
-#!/bin/bash
-
-# Project configuration
-export CSC_PROJECT="project_xxxxxxx"
-export PROJECT_USER_DIR="Harry"
-export ENV_NICKNAME="Dumbledore"
-
-# Derived paths
-export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
-export PYTHON_ROOT="$BASE_SCRATCH/Python"
-
-# Select the matching Tykky environment and native library for the current node architecture
-case "$(uname -m)" in
-    x86_64)
-        export ENV_ARCH="x64"
-        export KERNEL_ARCH="x86_64"
-        ;;
-    aarch64)
-        export ENV_ARCH="arm64"
-        export KERNEL_ARCH="aarch64"
-        ;;
-    *)
-        echo "Unsupported architecture: $(uname -m)"
-        return 1
-        ;;
-esac
-
-export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.11-$ENV_ARCH"
-export SMARTREDIS_DIR="$BASE_SCRATCH/SmartRedis-$ENV_ARCH"
-
-module load gcc/13.4.0
-
-export PATH="$ENV_PREFIX/bin:$PATH"
-
-# If lib64 does not exist on the target system, replace lib64 with lib.
-export LD_LIBRARY_PATH="$SMARTREDIS_DIR/install/lib64:${LD_LIBRARY_PATH:-}"
-export CMAKE_PREFIX_PATH="$SMARTREDIS_DIR/install:${CMAKE_PREFIX_PATH:-}"
-
-export SMARTSIM_DB_FILE_PARSE_TRIALS=600
-
-export JUPYTER_KERNEL_NAME="$ENV_NICKNAME-smartsim-$KERNEL_ARCH"
-export JUPYTER_KERNEL_DISPLAY="Python 3.11 ($ENV_NICKNAME SmartSim $KERNEL_ARCH)"
-export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share/$KERNEL_ARCH}"
-export JUPYTER_KERNEL_DIR="$XDG_DATA_HOME/jupyter/kernels/$JUPYTER_KERNEL_NAME"
-
-case "$ENV_ARCH" in
-    x64)
-        export JAX_PLATFORMS="cpu"
-        ;;
-    arm64)
-        export JAX_PLATFORMS="cuda"
-        ;;
-esac
-EOF
-```
-
-Make the loader executable:
-
-```bash
-chmod +x "$BASE_SCRATCH/Python4SmartSim.sh"
-```
-
-Edit the loader and replace `project_xxxxxxx`, `Harry`, and `Dumbledore` with your actual values.
-
-Load and validate:
-
-```bash
-source "$BASE_SCRATCH/Python4SmartSim.sh"
-
-python --version
-
-python -c "
-import jax
-import equinox
-import numpy
-import onnx
-import smartredis
-import smartsim
-
-print('SmartSim environment is ready.')
-print(jax.devices())
-"
-
-ls -la "$SMARTREDIS_DIR/install/lib64"
-```
+Create the architecture-aware loader as shown in the **Environment Activation / Loader** section.
 
 ---
 
@@ -1740,7 +1696,7 @@ rm -rf "$SMARTREDIS_DIR"
 
 ### `requirements.txt` Is Missing
 
-The file is generated only after the Python packages, SmartRedis Python client, SmartSim database dependencies, dependency restoration, and final compatibility check have completed successfully.
+The file is generated only after the Python packages, SmartRedis Python client, SmartSim database executable build, dependency restoration, and final compatibility check have completed successfully.
 
 Run a complete Tykky build:
 
@@ -1793,6 +1749,50 @@ then `smartsim==0.8.0` is probably being installed too early through `requiremen
 
 Keep `smartsim==0.8.0` out of `requirements.in`. The post-installation script must install the patched SmartRedis Python client first and install SmartSim only afterwards.
 
+### `smart build --device cpu` Reports No Valid Device Choices on ARM64
+
+On Roihu ARM64 GPU nodes, Python reports the machine architecture as:
+
+```text
+aarch64
+```
+
+SmartSim 0.8.0 internally uses:
+
+```text
+arm64
+```
+
+The post-installation script patches this alias:
+
+```text
+aarch64 -> arm64
+```
+
+SmartSim also builds its `--device` choices from the platform JSON files under:
+
+```text
+smartsim/_core/_install/configs/mlpackages
+```
+
+The default SmartSim 0.8.0 package does not provide a Linux ARM64 CPU entry there. The post-installation script therefore adds a minimal Redis-only platform config:
+
+```text
+linux + arm64 + cpu
+ml_packages = []
+```
+
+This enables Redis-only SmartSim database builds on Roihu ARM64:
+
+```bash
+smart build \
+    --device cpu \
+    --skip-backends \
+    --skip-python-packages
+```
+
+This does not build RedisAI, ONNXRuntime, PyTorch, or TensorFlow backends.
+
 ### `jax2onnx` Reports an Incompatible ONNX Version
 
 The incompatible state appears as:
@@ -1801,8 +1801,6 @@ The incompatible state appears as:
 jax2onnx requires onnx>=1.17.0,<1.19.0
 but onnx 1.15.0 is installed
 ```
-
-The SmartSim database build may install `onnx==1.15.0` for its ONNX Runtime backend.
 
 Keep this constraint in `requirements.in`:
 
@@ -1901,7 +1899,7 @@ print(CONFIG.database_exe)
 "
 ```
 
-Rebuild the database dependencies:
+Rebuild the database executable:
 
 ```bash
 export USE_SYSTEMD=no
@@ -1910,11 +1908,11 @@ smart clobber
 
 smart build \
     --device cpu \
-    --skip-torch \
-    --skip-tensorflow
+    --skip-backends \
+    --skip-python-packages
 ```
 
-After rebuilding the database dependencies, restore the requested Python package set:
+After rebuilding the database executable, restore the requested Python package set:
 
 ```bash
 uv pip install \
@@ -2003,7 +2001,7 @@ Repeat the native build.
 
 ### SmartSim Reports Incompatible Pointer Errors
 
-Rebuild the SmartSim database dependencies using:
+Rebuild the SmartSim database executable using:
 
 ```bash
 env \
@@ -2012,8 +2010,8 @@ env \
     USE_SYSTEMD=no \
     smart build \
         --device cpu \
-        --skip-torch \
-        --skip-tensorflow
+        --skip-backends \
+        --skip-python-packages
 ```
 
 Restore the Python dependency set afterwards:
@@ -2052,17 +2050,19 @@ Perform a complete rebuild instead of stacking additional incremental updates wh
 
 ## SmartSim Deployment Track
 
-This environment provides the software foundation for coupled multi-physics simulations in which parallel solvers exchange tensors and machine-learning models through SmartRedis.
+This environment provides the software foundation for coupled multi-physics simulations in which parallel solvers exchange tensors, model weights, metrics, and predictions through SmartRedis.
 
 Typical workflows include:
 
 * running the SmartSim Orchestrator on node-local storage;
-* launching OpenFOAM solvers through Slurm;
-* tracing Equinox models into ONNX graphs;
-* uploading ONNX models to SmartRedis;
-* evaluating the models during solver execution;
+* launching OpenFOAM solvers, Python producers, and Python consumers through Slurm;
+* exchanging model weights, input tensors, output tensors, metrics, and predictions through SmartRedis;
+* running JAX / Equinox training or inference in external Python producer and consumer processes;
+* using SmartRedis as the communication layer between OpenFOAM, Python workers, and monitoring tools;
 * exchanging distributed CFD fields through the Redis database;
 * linking external C++ or Fortran solvers against the native SmartRedis client.
+
+RedisAI model execution through `set_model`, `set_model_from_file`, or `run_model` is not part of the default Roihu ARM64 workflow. If direct RedisAI ONNX model execution is required, RedisAI and ONNXRuntime backends must be built separately on a supported platform.
 
 The complete production architecture, Slurm templates, database placement strategies, and model-injection examples are maintained in the [SmartSim4CSC reference repository](https://github.com/boss507104/SmartSim4CSC).
 
@@ -2091,10 +2091,14 @@ The complete production architecture, Slurm templates, database placement strate
 * The patched SmartRedis Python client is installed separately from its source repository.
 * SmartSim is installed separately after the patched SmartRedis Python client.
 * SmartRedis and SmartSim are excluded from `requirements.txt`.
+* The default build skips RedisAI and all ML backends.
+* SmartRedis is used for tensor, weight, metric, and prediction exchange.
+* JAX / Equinox model execution is performed by external Python processes.
+* ONNX is optional tooling in this environment, not a required RedisAI execution path.
+* `set_model`, `set_model_from_file`, and `run_model` require RedisAI backends and are not supported by the default Redis-only build.
 * Preserve the JAX, ONNX, NumPy, protobuf, Python, and CMake compatibility constraints.
 * `onnx==1.17.0` satisfies the `jax2onnx` requirement while remaining compatible with the pinned protobuf stack.
-* The SmartSim database build may temporarily install `onnx==1.15.0`.
-* The dependency set must therefore be reapplied after `smart build`.
+* The dependency set is reapplied after `smart build` as a conservative restoration step.
 * The final `uv pip check` must run only after the dependency restoration step.
 * Every `uv pip install` uses `--link-mode=copy` because the uv cache and Tykky target environment reside on different filesystems.
 * The SmartRedis Python client and SmartRedis native libraries serve different purposes.
@@ -2103,7 +2107,7 @@ The complete production architecture, Slurm templates, database placement strate
 * `CMAKE_PREFIX_PATH` points to the SmartRedis installation prefix for downstream CMake projects.
 * The native SmartRedis library must be rebuilt when its compiler, source, target system, or ABI changes.
 * `UV_CONCURRENT_DOWNLOADS=4` limits simultaneous external package downloads.
-* Missing PyTorch and TensorFlow backends in `smart validate` are intentional.
+* Missing RedisAI, ONNXRuntime, PyTorch, and TensorFlow backends in `smart validate` are intentional for the default Redis-only build.
 * GPU execution requires a GPU allocation and compatible host drivers.
 * Use compute nodes for package installation, SmartSim database compilation, SmartRedis native compilation, and computational workloads.
 * Avoid performing large package installations or native builds directly on CSC login nodes.
