@@ -464,9 +464,14 @@ fi
 
 export PYTHON_PREFIX="$(python -c 'import sys; print(sys.prefix)')"
 export JULIA_DEPOT_PATH="$PYTHON_PREFIX/julia_depot"
-export PYTHON_JULIAPKG_PROJECT="$PYTHON_PREFIX/julia_env"
-export PYTHON_JULIAPKG_OFFLINE="yes"
+
+# Use the Julia runtime and project already packaged inside Tykky.
+# Setting both variables disables JuliaPkg runtime resolution and lock creation.
+export PYTHON_JULIACALL_EXE="$JULIA_DEPOT_PATH/pyjuliapkg/install/bin/julia"
+export PYTHON_JULIACALL_PROJECT="$PYTHON_PREFIX/julia_env"
 export PYTHON_JULIACALL_THREADS="${SLURM_CPUS_PER_TASK:-auto}"
+unset PYTHON_JULIAPKG_PROJECT
+unset PYTHON_JULIAPKG_OFFLINE
 
 export JUPYTER_KERNEL_NAME="$ENV_NICKNAME-ml-$KERNEL_ARCH"
 export JUPYTER_KERNEL_DISPLAY="Python 3.12 ($ENV_NICKNAME ML $KERNEL_ARCH)"
