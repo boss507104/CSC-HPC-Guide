@@ -105,6 +105,10 @@ echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
 
 ```text
 /scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities/     # $BASE_SCRATCH
+├── .julia_env_runtime_x64/
+├── .julia_env_runtime_arm64/
+├── .julia_depot_runtime_x64/
+├── .julia_depot_runtime_arm64/
 ├── .tykky_runtime_x64/
 ├── .tykky_runtime_arm64/
 ├── Python4ML.sh
@@ -113,7 +117,10 @@ echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
     ├── extra4ML.sh
     ├── update4ML.sh
     ├── requirements.in
-    ├── requirements.txt
+    ├── requirements-x64.txt
+    ├── requirements-arm64.txt
+    ├── julia-environment-x64.txt
+    ├── julia-environment-arm64.txt
     └── envs/
         ├── $ENV_NICKNAME-3.12-x64/
         └── $ENV_NICKNAME-3.12-arm64/
