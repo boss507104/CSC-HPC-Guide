@@ -1,248 +1,154 @@
 # ML Environment Configuration
 
-Last updated: 8 July 2026
+Last updated: 15 July 2026
 
 ---
 
 ## Overview & Motivation
 
-This folder contains configurations for deploying a reliable, high-performance runtime stack optimised for modern machine learning, statistics, and detailed chemical kinetics analysis on CSC supercomputers (**Puhti / Mahti / Roihu**). The setup focuses on a high-throughput **JAX + Equinox + ONNX** development ecosystem.
+This folder contains configurations for deploying a reliable, high-performance runtime stack optimised for machine learning, statistics, symbolic regression, and chemical kinetics analysis on CSC supercomputers (**Puhti / Mahti / Roihu**). The core stack is **JAX + Equinox + ONNX + PySR (JuliaCall)**.
 
-Instead of deploying traditional Conda or pip environments directly on the parallel filesystem, we use **Tykky** to package the Python stack inside a single-file container image. This design reduces the Lustre parallel filesystem degradation caused by thousands of small metadata operations during Python package imports.
+Instead of Conda/pip environments directly on the parallel filesystem, we use **Tykky** to package the whole Python stack into a single-file container image, avoiding Lustre metadata slowdowns from thousands of small file imports.
 
-Roihu requires separate Tykky environments for CPU and GPU nodes because Roihu CPU nodes use **x64 / amd64**, while Roihu GPU nodes use **ARM64 / aarch64**. A Tykky container built on one architecture should not be expected to run on the other.
+Roihu needs **two separate Tykky environments**:
 
-### Why Tykky?
+| Track | Applies to | CPU arch |
+|---|---|---|
+| `x64` | Roihu CPU nodes, Puhti, Mahti | x86_64 / amd64 |
+| `arm64` | Roihu GPU nodes | aarch64 / ARM64 |
 
-* **Import Performance** — Library initialisation times drop from several minutes to seconds.
-* **Reproducibility** — The complete execution stack remains packaged inside a single container image.
-* **Startup Latency** — Fast environment startup is valuable for high-volume, short MPI jobs.
-* **Isolation** — The Python dependency stack remains separated from the cluster host environment.
+A container built for one architecture will not run on the other.
 
-### Why uv?
+**Why Tykky:** near-instant imports, a single reproducible image, fast startup for short/high-volume jobs, and isolation from the host environment.
 
-This configuration uses **uv** inside the Tykky build environment to install Python packages.
-
-* **Fast Installation** — uv downloads and installs large scientific Python dependency sets efficiently.
-* **Compatible Dependency Selection** — uv resolves compatible direct and transitive package versions during installation.
-* **Simple Workflow** — Packages are installed directly from `requirements.in`.
-* **Installed-State Record** — The final installed package versions are recorded in `requirements.txt`.
-
-The direct package specifications in `requirements.in` intentionally avoid strict version pins. Each new build may therefore install newer compatible package versions.
-
-The two dependency files have different roles:
+**Why uv:** fast resolution/installation of a large scientific stack. Direct specs live in `requirements.in` (unpinned on purpose, so builds pick up newer compatible versions); the exact installed set is recorded in `requirements.txt`.
 
 ```text
 requirements.in   Human-maintained direct package specifications
 requirements.txt  Exact installed package versions recorded after the build
 ```
 
-Dependency installation takes place inside the Python 3.12 environment created by Tykky. No external Conda, Miniforge, Mamba, Python module, or virtual environment is required.
+No external Conda, Miniforge, Mamba, module-based Python, or venv is needed — everything happens inside the Tykky Python 3.12 build.
+
+PySR uses `juliacall`. Because Tykky's `--post-install` script runs *inside* the activated build environment, Julia + its packages can be resolved and precompiled once, at build time, and shipped inside the container image.
 
 ---
 
 ## Build Flow
 
-Use the x64 track for Roihu CPU nodes and other x86_64 systems such as Puhti and Mahti.
-
-Use the ARM64 track for Roihu GPU nodes.
-
-If you do not use Roihu GPU nodes, the ARM64 track can be skipped.
-
 ```text
-Start
-  |
-  v
 Choose target architecture
   |
-  +-- x64 / CPU nodes
-  |     |
-  |     v
-  |   Run x64 Global Configuration
-  |     |
-  |     v
-  |   Build ML Tykky env:
-  |   $PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-x64
+  +-- x64  (Roihu CPU / Puhti / Mahti)  --> Global Config (x64)  --> build envs/$ENV_NICKNAME-3.12-x64
   |
-  +-- ARM64 / Roihu GPU nodes
-        |
-        v
-      Run ARM64 Global Configuration
-        |
-        v
-      Build ML Tykky env:
-      $PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-arm64
+  +-- arm64 (Roihu GPU)                 --> Global Config (arm64) --> build envs/$ENV_NICKNAME-3.12-arm64
 
-After the required architecture tracks are built:
-  |
-  v
-Create Python4ML.sh
-  |
-  v
-source Python4ML.sh
-  |
-  v
-The loader selects x64 or ARM64 automatically from uname -m
+After the required track(s) are built:
+  Create Python4ML.sh  -->  source Python4ML.sh  -->  loader picks x64/arm64 from `uname -m`
 ```
+
+Skip the `arm64` track entirely if you never use Roihu GPU nodes.
 
 ---
 
-## Global Configuration
+## 1. Global Configuration
 
-Execute one of the following configuration blocks depending on the target node architecture.
+Run **one** of these blocks depending on the node you're on. Everything below (`$PYTHON_ROOT`, `$ENV_PREFIX`, etc.) depends on it.
 
-Use the **x64 configuration** for Roihu CPU nodes and other x86_64 systems such as Puhti and Mahti.
+> `Harry` and `Dumbledore` are fictional placeholders used throughout this doc. Replace them — and `project_xxxxxxx` — with your real values **everywhere they appear**, including inside `Python4ML.sh`.
 
-Use the **ARM64 configuration** for Roihu GPU nodes.
-
-### x64 Configuration for CPU Nodes
-
-Run this block before building the CPU-node environment:
+### 1.1 x64 (Roihu CPU / Puhti / Mahti)
 
 ```bash
 # --- USER CONFIGURATION START ---
 export CSC_PROJECT="project_xxxxxxx"        # Your CSC project ID
 export PROJECT_USER_DIR="Harry"             # Your directory under the CSC project
 export ENV_NICKNAME="Dumbledore"            # Desired environment name
-export ENV_ARCH="x64"                       # x64 / amd64 environment for CPU nodes
+export ENV_ARCH="x64"
 # --- USER CONFIGURATION END ---
 
-# Derived paths
 export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
 export PYTHON_ROOT="$BASE_SCRATCH/Python"
 export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
 export TMP_BUILD_DIR="$BASE_SCRATCH/.tykky_runtime_$ENV_ARCH"
 
-# Initialise directories without removing existing environments
 mkdir -p "$PYTHON_ROOT/envs" "$TMP_BUILD_DIR"
 
-echo "x64 configuration loaded for $CSC_PROJECT."
+echo "ENV_ARCH=$ENV_ARCH"
 echo "ENV_PREFIX=$ENV_PREFIX"
 echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
 ```
 
-### ARM64 Configuration for Roihu GPU Nodes
-
-Run this block before building the Roihu GPU-node environment:
+### 1.2 arm64 (Roihu GPU)
 
 ```bash
 # --- USER CONFIGURATION START ---
-export CSC_PROJECT="project_xxxxxxx"        # Your CSC project ID
-export PROJECT_USER_DIR="Harry"             # Your directory under the CSC project
-export ENV_NICKNAME="Dumbledore"            # Desired environment name
-export ENV_ARCH="arm64"                     # ARM64 / aarch64 environment for Roihu GPU nodes
-# --- USER CONFIGURATION END ---
-
-# Derived paths
-export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
-export PYTHON_ROOT="$BASE_SCRATCH/Python"
-export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
-export TMP_BUILD_DIR="$BASE_SCRATCH/.tykky_runtime_$ENV_ARCH"
-
-# Initialise directories without removing existing environments
-mkdir -p "$PYTHON_ROOT/envs" "$TMP_BUILD_DIR"
-
-echo "ARM64 configuration loaded for $CSC_PROJECT."
-echo "ENV_PREFIX=$ENV_PREFIX"
-echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
-```
-
-The configuration variables represent:
-
-```text
-CSC_PROJECT       CSC project ID
-PROJECT_USER_DIR  Personal or shared directory under the CSC project
-ENV_NICKNAME      Name assigned to the Python environment
-ENV_ARCH          Target architecture: x64 or arm64
-```
-
-For example:
-
-```bash
 export CSC_PROJECT="project_xxxxxxx"
 export PROJECT_USER_DIR="Harry"
 export ENV_NICKNAME="Dumbledore"
-export ENV_ARCH="x64"
+export ENV_ARCH="arm64"
+# --- USER CONFIGURATION END ---
+
+export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
+export PYTHON_ROOT="$BASE_SCRATCH/Python"
+export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
+export TMP_BUILD_DIR="$BASE_SCRATCH/.tykky_runtime_$ENV_ARCH"
+
+mkdir -p "$PYTHON_ROOT/envs" "$TMP_BUILD_DIR"
+
+echo "ENV_ARCH=$ENV_ARCH"
+echo "ENV_PREFIX=$ENV_PREFIX"
+echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
 ```
 
-The resulting x64 environment path is:
+**Directory layout produced by this config:**
 
 ```text
-/scratch/project_xxxxxxx/Harry/Utilities/Python/envs/Dumbledore-3.12-x64
-```
-
-The resulting ARM64 environment path is:
-
-```text
-/scratch/project_xxxxxxx/Harry/Utilities/Python/envs/Dumbledore-3.12-arm64
-```
-
-`Harry` and `Dumbledore` are fictional placeholder values used in this public documentation. Replace them with your actual project directory and preferred environment name.
-
-`PROJECT_USER_DIR` is not necessarily the same as your CSC login username. It identifies the directory located directly under the CSC project scratch path.
-
-**Directory Structure**
-
-```plaintext
-/scratch/
-└── $CSC_PROJECT/
-    └── $PROJECT_USER_DIR/
-        └── Utilities/                             # $BASE_SCRATCH
-            ├── .tykky_runtime_x64/                # x64 temporary build directory
-            ├── .tykky_runtime_arm64/              # ARM64 temporary build directory
-            ├── Python4ML.sh
-            └── Python/                            # $PYTHON_ROOT
-                ├── base4ML.yml
-                ├── extra4ML.sh
-                ├── update4ML.sh
-                ├── requirements.in
-                ├── requirements.txt
-                └── envs/
-                    ├── $ENV_NICKNAME-3.12-x64/    # x64 Tykky environment
-                    └── $ENV_NICKNAME-3.12-arm64/  # ARM64 Tykky environment
+/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities/     # $BASE_SCRATCH
+├── .tykky_runtime_x64/
+├── .tykky_runtime_arm64/
+├── Python4ML.sh
+└── Python/                                            # $PYTHON_ROOT
+    ├── base4ML.yml
+    ├── extra4ML.sh
+    ├── update4ML.sh
+    ├── requirements.in
+    ├── requirements.txt
+    └── envs/
+        ├── $ENV_NICKNAME-3.12-x64/
+        └── $ENV_NICKNAME-3.12-arm64/
 ```
 
 ---
 
-## Dependency Overview
+## 2. Dependency Overview
 
 | Package | Version Policy | Purpose |
 | --- | --- | --- |
-| **Python** | 3.12 | Base interpreter created by Tykky |
-| **uv** | Latest available during the build | Dependency resolution and installation |
-| **NumPy** | Compatible version selected during installation | Core numerical array backend |
-| **JAX** | Compatible CUDA 12 release selected during installation | Array programming and automatic differentiation |
-| **Equinox** | Compatible version selected during installation | Neural-network and PyTree framework for JAX |
-| **ONNX / jax2onnx** | Compatible versions selected during installation | Model export and interoperability |
+| Python | 3.12 | Base interpreter |
+| uv | latest at build time | Resolution & installation |
+| NumPy | resolved | Numerical backend |
+| JAX | CUDA 12 build, resolved | Autodiff / array programming |
+| Equinox | resolved | NN / PyTree framework for JAX |
+| ONNX / jax2onnx | resolved | Model export |
+| PySR / julia (JuliaCall) | resolved | Symbolic regression |
 
 ---
 
-## Installation Steps
-
-### 1. Create the Configuration Files
-
-Create the Python configuration directory:
+## 3. Create the Configuration Files
 
 ```bash
 mkdir -p "$PYTHON_ROOT"
 cd "$PYTHON_ROOT"
 ```
 
-### 1.1 Create the Base Conda Specification
-
-Create `base4ML.yml`:
+### 3.1 `base4ML.yml`
 
 ```bash
-nano -m base4ML.yml
-```
-
-Insert:
-
-```yaml
+cat <<'EOF' > "$PYTHON_ROOT/base4ML.yml"
 channels:
   - conda-forge
   - nodefaults
-
 dependencies:
   - python=3.12
   - pip
@@ -251,19 +157,13 @@ dependencies:
   - cmake
   - make
   - ninja
+EOF
 ```
 
-### 1.2 Create the Direct Dependency Specification
-
-Create `requirements.in`:
+### 3.2 `requirements.in`
 
 ```bash
-nano -m requirements.in
-```
-
-Insert:
-
-```text
+cat <<'EOF' > "$PYTHON_ROOT/requirements.in"
 # --- Core Math & Data ---
 numpy
 bottleneck
@@ -307,12 +207,18 @@ linear-tree
 mlflow
 mlxtend
 scikit-learn
+shap
 tensorboard
 wandb
 xgboost
 
+# --- Symbolic Regression & Julia ---
+pysr
+julia
+
 # --- Hyperparameter Optimisation ---
 optuna
+optuna-dashboard
 
 # --- Statistics ---
 statsmodels
@@ -335,15 +241,22 @@ ruptures
 sympy
 tensorly
 
+# --- Data Version Control ---
+dvc
+
 # --- Custom Utilities ---
 DataGraph @ git+https://github.com/boss507104/DataGraph.git#subdirectory=DataGraph
+
+# --- Notebook Execution ---
+ipykernel
+ipywidgets
+IPython
+nbconvert
+papermill
 
 # --- Visualisation & UI ---
 cmocean
 colorcet
-ipykernel
-ipywidgets
-IPython
 ipyvtklink
 k3d
 matplotlib
@@ -369,65 +282,90 @@ natsort
 pytest
 tabulate
 typing-extensions
+EOF
 ```
 
-### 1.3 Create the Post-Installation Script
+### 3.3 `extra4ML.sh` (post-install, runs *inside* the build)
 
-Create `extra4ML.sh`:
-
-```bash
-nano -m extra4ML.sh
-```
-
-Insert:
+This installs the stack via `uv`, then resolves/precompiles PySR's Julia dependency so it's baked into the image.
 
 ```bash
+cat <<'EOF' > "$PYTHON_ROOT/extra4ML.sh"
 #!/bin/bash
 set -e
 
-# Confirm that the build variables are available
 : "${CW_BUILD_TMPDIR:?CW_BUILD_TMPDIR is not set}"
 : "${PYTHON_ROOT:?PYTHON_ROOT is not set}"
 
-# Redirect temporary files and package caches to scratch
 export TMPDIR="$CW_BUILD_TMPDIR"
 export PIP_CACHE_DIR="$CW_BUILD_TMPDIR/.pip_cache"
 export UV_CACHE_DIR="$CW_BUILD_TMPDIR/.uv_cache"
 export UV_CONCURRENT_DOWNLOADS=4
-
 mkdir -p "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
 
-# Install uv inside the active Python 3.12 Tykky build environment
+# Always derive the Julia paths from the *actual* Python sys.prefix inside
+# the container, not from $ENV_PREFIX — Tykky's wrapper path and the real
+# in-container prefix are not the same thing.
+PYTHON_PREFIX="$(python -c 'import sys; print(sys.prefix)')"
+export JULIA_DEPOT_PATH="$PYTHON_PREFIX/julia_depot"
+export PYTHON_JULIAPKG_PROJECT="$PYTHON_PREFIX/julia_env"
+mkdir -p "$JULIA_DEPOT_PATH" "$PYTHON_JULIAPKG_PROJECT"
+
 python -m pip install --no-cache-dir uv
 
-# Install the direct dependencies and their compatible transitive dependencies
-uv pip install \
-    --requirements "$PYTHON_ROOT/requirements.in"
+uv pip install --requirements "$PYTHON_ROOT/requirements.in"
 
-# Record the exact installed package versions
-python -m pip freeze > "$PYTHON_ROOT/requirements.txt"
+python - <<'PY'
+import juliapkg
+juliapkg.resolve()
+print(f"Julia executable: {juliapkg.executable()}")
+print(f"Julia project:    {juliapkg.project()}")
+PY
 
-# Remove package caches
+python - <<'PY'
+import pysr
+print(f"PySR version: {pysr.__version__}")
+PY
+
+python - <<'PY'
+import juliapkg, subprocess
+julia, project = juliapkg.executable(), juliapkg.project()
+subprocess.run(
+    [julia, f"--project={project}", "-e",
+     "using Pkg; Pkg.instantiate(); Pkg.precompile(); "
+     "using PythonCall; using SymbolicRegression"],
+    check=True,
+)
+PY
+
+python -m pip freeze > "$PYTHON_ROOT/requirements-$ENV_ARCH.txt"
+
+python - <<'PY' > "$PYTHON_ROOT/julia-environment-$ENV_ARCH.txt"
+import juliapkg, subprocess
+julia, project = juliapkg.executable(), juliapkg.project()
+print(f"Julia executable: {julia}")
+print(f"Julia project: {project}\n")
+subprocess.run(
+    [julia, f"--project={project}", "-e",
+     "using InteractiveUtils; versioninfo(); using Pkg; Pkg.status()"],
+    check=True,
+)
+PY
+
 rm -rf "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
-```
-
-Make the script executable:
-
-```bash
-chmod +x extra4ML.sh
+EOF
+chmod +x "$PYTHON_ROOT/extra4ML.sh"
 ```
 
 ---
 
-## 2. Build the Tykky Container
+## 4. Request a Build Node
 
-Build the x64 environment from an x64 CPU node.
+> **Tip — downloads:** `uv pip install` and Julia's package resolution both need outbound internet access. If your compute-node allocation has restricted/unstable external network access and the build fails or stalls specifically at the download stage, try running the download-heavy steps on the **login node** first (or the whole build, if your project's policy allows it), and reserve `srun`/`sinteractive` for genuinely compute-heavy steps. Check your own cluster's login-node usage policy before doing large builds there.
 
-Build the ARM64 environment from a Roihu GPU node.
+This block is reused for the initial build, updates, and rebuilds — just re-run it whenever you need a fresh allocation.
 
-### 2.1 Request an x64 CPU Build Node
-
-Use this for the x64 environment:
+**x64:**
 
 ```bash
 srun --account="$CSC_PROJECT" \
@@ -435,112 +373,79 @@ srun --account="$CSC_PROJECT" \
     --nodes=1 \
     --ntasks=1 \
     --cpus-per-task=16 \
-    --time=01:30:00 \
+    --time=03:00:00 \
     --pty bash
 ```
 
-### 2.2 Request an ARM64 Roihu GPU Build Node
-
-Use this for the ARM64 environment:
+**arm64 (Roihu GPU):**
 
 ```bash
 sinteractive \
     --account "$CSC_PROJECT" \
     --gpu \
     --cores 36 \
-    --time 01:30:00
+    --time 03:00:00
 ```
 
-### 2.3 Build the Environment
+If the environment variables from Section 1 aren't inherited into the new shell, re-run the matching Global Configuration block after the allocation starts.
 
-Load Tykky:
+---
+
+## 5. Build the Tykky Environment
 
 ```bash
 module purge
 module load tykky
-```
 
-Configure the temporary build directory:
-
-```bash
 export TMPDIR="$TMP_BUILD_DIR"
 export CW_BUILD_TMPDIR="$TMP_BUILD_DIR"
 
-mkdir -p "$TMPDIR"
-```
+rm -rf "$ENV_PREFIX" "$TMP_BUILD_DIR"
+mkdir -p "$TMP_BUILD_DIR"
 
-Confirm that the configuration files exist:
-
-```bash
-ls -l \
-    "$PYTHON_ROOT/base4ML.yml" \
-    "$PYTHON_ROOT/extra4ML.sh" \
-    "$PYTHON_ROOT/requirements.in"
-```
-
-Remove an existing or incomplete environment:
-
-```bash
-echo "This will remove only this Tykky environment:"
-echo "$ENV_PREFIX"
-rm -rf "$ENV_PREFIX"
-```
-
-Build the container:
-
-```bash
 conda-containerize new \
     --prefix "$ENV_PREFIX" \
     --post-install "$PYTHON_ROOT/extra4ML.sh" \
     "$PYTHON_ROOT/base4ML.yml"
 ```
 
-During the build, Tykky performs these operations:
+Build order: create the base env → run `extra4ML.sh` → install `uv` → install from `requirements.in` → record `requirements.txt` → resolve/precompile Julia+PySR → package everything into the Tykky image.
 
-```text
-1. Creates the Python 3.12 base environment.
-2. Runs extra4ML.sh inside the environment.
-3. Installs uv.
-4. Installs the packages listed in requirements.in.
-5. Records the installed package versions in requirements.txt.
-6. Packages the complete environment into the Tykky image.
-```
-
-After the build completes:
+Check the result:
 
 ```bash
 ls -ld "$ENV_PREFIX"
-ls -lh "$PYTHON_ROOT/requirements.txt"
+ls -lh "$PYTHON_ROOT/requirements-$ENV_ARCH.txt"
+ls -lh "$PYTHON_ROOT/julia-environment-$ENV_ARCH.txt"
 ```
+
+Build the other architecture separately, using its own Global Configuration (Section 1) and matching node (Section 4).
 
 ---
 
-## Environment Activation / Loader
-
-Create `$BASE_SCRATCH/Python4ML.sh`:
+## 6. Loader — `Python4ML.sh`
 
 ```bash
 cat <<'EOF' > "$BASE_SCRATCH/Python4ML.sh"
 #!/bin/bash
 
-# Project configuration
 export CSC_PROJECT="project_xxxxxxx"
 export PROJECT_USER_DIR="Harry"
 export ENV_NICKNAME="Dumbledore"
 
-# Derived paths
 export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
 export PYTHON_ROOT="$BASE_SCRATCH/Python"
 
-# Select the matching Tykky environment for the current node architecture
 case "$(uname -m)" in
     x86_64)
         export ENV_ARCH="x64"
         export KERNEL_ARCH="x86_64"
+        export JAX_PLATFORMS="cpu"
         ;;
     aarch64)
         export ENV_ARCH="arm64"
         export KERNEL_ARCH="aarch64"
+        export JAX_PLATFORMS="cuda"
         ;;
     *)
         echo "Unsupported architecture: $(uname -m)"
@@ -549,755 +454,296 @@ case "$(uname -m)" in
 esac
 
 export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
-
-# Tykky executable path
 export PATH="$ENV_PREFIX/bin:$PATH"
 
-# Jupyter kernel metadata
+if [ ! -x "$ENV_PREFIX/bin/python" ]; then
+    echo "Environment not found for $ENV_ARCH: $ENV_PREFIX"
+    return 1
+fi
+
+export PYTHON_PREFIX="$(python -c 'import sys; print(sys.prefix)')"
+export JULIA_DEPOT_PATH="$PYTHON_PREFIX/julia_depot"
+export PYTHON_JULIAPKG_PROJECT="$PYTHON_PREFIX/julia_env"
+export PYTHON_JULIAPKG_OFFLINE="yes"
+export PYTHON_JULIACALL_THREADS="${SLURM_CPUS_PER_TASK:-auto}"
+
 export JUPYTER_KERNEL_NAME="$ENV_NICKNAME-ml-$KERNEL_ARCH"
 export JUPYTER_KERNEL_DISPLAY="Python 3.12 ($ENV_NICKNAME ML $KERNEL_ARCH)"
-
-# Architecture-specific Jupyter user data directory
-export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share/$KERNEL_ARCH}"
+export XDG_DATA_HOME="$HOME/.local/share/$KERNEL_ARCH"
 export JUPYTER_KERNEL_DIR="$XDG_DATA_HOME/jupyter/kernels/$JUPYTER_KERNEL_NAME"
 
-# Select JAX backend
-case "$ENV_ARCH" in
-    x64)
-        export JAX_PLATFORMS="cpu"
-        ;;
-    arm64)
-        export JAX_PLATFORMS="cuda"
-        ;;
-esac
+echo "ENV_ARCH=$ENV_ARCH"
+echo "ENV_PREFIX=$ENV_PREFIX"
+echo "JAX_PLATFORMS=$JAX_PLATFORMS"
 EOF
-```
-
-Edit the loader and replace `project_xxxxxxx`, `Harry`, and `Dumbledore` with your actual values:
-
-```bash
-nano -m "$BASE_SCRATCH/Python4ML.sh"
-```
-
-Make the loader executable:
-
-```bash
 chmod +x "$BASE_SCRATCH/Python4ML.sh"
 ```
 
-Load the environment:
+Replace `project_xxxxxxx`, `Harry`, `Dumbledore` inside the file with your real values, then load it:
 
 ```bash
 source "$BASE_SCRATCH/Python4ML.sh"
-```
-
-Confirm the selected environment:
-
-```bash
-echo "$ENV_PREFIX"
-python --version
-```
-
-For CPU-only execution:
-
-```bash
-export JAX_PLATFORMS="cpu"
+uname -m; echo "$ENV_ARCH"; echo "$ENV_PREFIX"
+which python; python --version
 ```
 
 ---
 
-## VS Code Kernel Registration
+## 7. Register the Jupyter Kernel
 
-The kernel should be registered separately on each architecture after loading the matching environment.
-
-Load the environment:
+Run once **per architecture**, after sourcing the loader on that architecture:
 
 ```bash
 source "$BASE_SCRATCH/Python4ML.sh"
-```
-
-Confirm the selected architecture and kernel metadata:
-
-```bash
-echo "ENV_ARCH=$ENV_ARCH"
-echo "KERNEL_ARCH=$KERNEL_ARCH"
-echo "ENV_PREFIX=$ENV_PREFIX"
-echo "JUPYTER_KERNEL_NAME=$JUPYTER_KERNEL_NAME"
-echo "JUPYTER_KERNEL_DISPLAY=$JUPYTER_KERNEL_DISPLAY"
-echo "XDG_DATA_HOME=$XDG_DATA_HOME"
-echo "JUPYTER_KERNEL_DIR=$JUPYTER_KERNEL_DIR"
-```
-
-Create the architecture-specific Jupyter kernel directory:
-
-```bash
 mkdir -p "$JUPYTER_KERNEL_DIR"
-```
 
-Create `kernel.json`:
-
-```bash
 cat <<EOF > "$JUPYTER_KERNEL_DIR/kernel.json"
 {
-  "argv": [
-    "$ENV_PREFIX/bin/python",
-    "-m",
-    "ipykernel_launcher",
-    "-f",
-    "{connection_file}"
-  ],
+  "argv": ["$ENV_PREFIX/bin/python", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
   "display_name": "$JUPYTER_KERNEL_DISPLAY",
   "language": "python",
-  "metadata": {
-    "debugger": true
-  }
+  "metadata": { "debugger": true }
 }
 EOF
-```
 
-Confirm the registration:
-
-```bash
 cat "$JUPYTER_KERNEL_DIR/kernel.json"
 jupyter kernelspec list
 ```
 
-Remove an obsolete kernel:
+Remove an obsolete kernel: `jupyter kernelspec uninstall -f <kernel_name>`.
 
-```bash
-jupyter kernelspec uninstall -f <kernel_name>
-```
-
-After registering the kernel, reload the VS Code remote window:
-
-```text
-Command Palette → Developer: Reload Window
-```
+Then in VS Code: **Command Palette → Developer: Reload Window**.
 
 ---
 
-## Validation
-
-Load the environment:
+## 8. Validate the Environment
 
 ```bash
 source "$BASE_SCRATCH/Python4ML.sh"
+
+python - <<'PY'
+import sys, dvc, equinox, jax, nbconvert, numpy, optuna, papermill, pysr, shap
+
+print(f"Python:      {sys.version.split()[0]}")
+print(f"JAX:         {jax.__version__}  backend={jax.default_backend()}  devices={jax.devices()}")
+print(f"Equinox:     {equinox.__version__}")
+print(f"NumPy:       {numpy.__version__}")
+print(f"PySR:        {pysr.__version__}")
+print(f"Papermill:   {papermill.__version__}")
+print(f"nbconvert:   {nbconvert.__version__}")
+print(f"DVC:         {dvc.__version__}")
+print(f"SHAP:        {shap.__version__}")
+PY
 ```
 
-Verify the core package versions:
+Scientific stack import check:
 
 ```bash
 python -c "
-import sys
-import jax
-import equinox as eqx
-import numpy as np
-from importlib.metadata import version
-
-print(f'Python:     {sys.version.split()[0]}')
-print(f'JAX:        {jax.__version__}')
-print(f'Equinox:    {eqx.__version__}')
-print(f'jax2onnx:   {version(\"jax2onnx\")}')
-print(f'NumPy:      {np.__version__}')
-print(f'Backend:    {jax.default_backend()}')
-print(f'Devices:    {jax.devices()}')
-"
-```
-
-Verify the main scientific packages:
-
-```bash
-python -c "
-import cantera
-import h5py
-import matplotlib
-import onnx
-import optax
-import pandas
-import scipy
-import sklearn
-import xarray
-
+import cantera, h5py, matplotlib, onnx, optax, pandas, scipy, sklearn, xarray
 print('Core ML and scientific packages imported successfully.')
 "
 ```
 
-Inspect the installed package versions:
+**JuliaCall** (should not download or install anything — that already happened at build time):
+
+```bash
+python - <<'PY'
+import juliapkg
+from juliacall import Main as jl
+print(f"Julia executable: {juliapkg.executable()}")
+print(f"Julia version:    {jl.VERSION}")
+print(f"Julia threads:    {jl.Threads.nthreads()}")
+PY
+```
+
+**PySR** end-to-end fit:
+
+```bash
+python - <<'PY'
+import numpy as np
+from pysr import PySRRegressor
+
+X = np.linspace(-2.0, 2.0, 100)[:, None]
+y = X[:, 0]**2 + 2.0 * X[:, 0] + 1.0
+
+model = PySRRegressor(niterations=5, populations=2, population_size=20,
+                       binary_operators=["+", "-", "*"], progress=False, verbosity=0)
+model.fit(X, y)
+print(model.sympy())
+PY
+```
+
+**Papermill / nbconvert / Optuna Dashboard:**
+
+```bash
+papermill --version
+jupyter nbconvert --version
+optuna-dashboard --version
+```
+
+Inspect installed vs. recorded versions:
 
 ```bash
 python -m pip freeze
-```
-
-Inspect the recorded package versions:
-
-```bash
-head -n 40 "$PYTHON_ROOT/requirements.txt"
+head -n 40 "$PYTHON_ROOT/requirements-$ENV_ARCH.txt"
 ```
 
 ---
 
-## Dependency File Workflow
-
-The dependency files serve different purposes:
+## 9. Dependency File Workflow
 
 ```text
-requirements.in
-    Human-maintained direct package specifications.
-
-requirements.txt
-    Exact installed package versions recorded after installation.
+requirements.in   Human-maintained direct package specifications
+requirements.txt  Exact installed versions recorded after a completed build
 ```
 
-### Add a Package
-
-Open `requirements.in`:
+**Add a package** — append it to `requirements.in`, then rebuild/update (Section 10 or 11):
 
 ```bash
 nano -m "$PYTHON_ROOT/requirements.in"
 ```
 
-Add the package on its own line.
+**Remove a package** — delete its line, then do a full rebuild (Section 11) so unused transitive dependencies are also dropped.
 
-For example:
-
-```text
-psutil
-```
-
-Save the file and rebuild or update the environment.
-
-### Remove a Package
-
-Open `requirements.in`:
-
-```bash
-nano -m "$PYTHON_ROOT/requirements.in"
-```
-
-Remove the package entry.
-
-Perform a complete rebuild to ensure that the removed package and unused transitive dependencies are no longer present.
-
-### Reproduce an Existing Installed Package Set
-
-The generated `requirements.txt` contains the installed versions from the completed build.
-
-To create another environment from those exact versions, temporarily replace this line in `extra4ML.sh`:
-
-```bash
-uv pip install \
-    --requirements "$PYTHON_ROOT/requirements.in"
-```
-
-with:
-
-```bash
-uv pip install \
-    --requirements "$PYTHON_ROOT/requirements.txt"
-```
-
-For normal development builds, continue using `requirements.in`.
+**Reproduce an exact installed set** — temporarily point the install line in `extra4ML.sh` at `requirements-$ENV_ARCH.txt` instead of `requirements.in`, rebuild, then switch it back for normal development.
 
 ---
 
-## Adding or Updating Packages
-
-### 1. Edit the Direct Dependencies
-
-Edit:
+## 10. Updating the Environment
 
 ```bash
-nano -m "$PYTHON_ROOT/requirements.in"
-```
-
-### 2. Create the Update Script
-
-Create `update4ML.sh`:
-
-```bash
-nano -m "$PYTHON_ROOT/update4ML.sh"
-```
-
-Insert:
-
-```bash
+cat <<'EOF' > "$PYTHON_ROOT/update4ML.sh"
 #!/bin/bash
 set -e
 
-# Confirm that the build variables are available
 : "${CW_BUILD_TMPDIR:?CW_BUILD_TMPDIR is not set}"
 : "${PYTHON_ROOT:?PYTHON_ROOT is not set}"
+: "${ENV_ARCH:?ENV_ARCH is not set}"
 
-# Redirect temporary files and package caches to scratch
 export TMPDIR="$CW_BUILD_TMPDIR"
 export PIP_CACHE_DIR="$CW_BUILD_TMPDIR/.pip_cache"
 export UV_CACHE_DIR="$CW_BUILD_TMPDIR/.uv_cache"
-
 export UV_CONCURRENT_DOWNLOADS=4
 mkdir -p "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
 
-# Install uv inside the active Tykky update environment
+PYTHON_PREFIX="$(python -c 'import sys; print(sys.prefix)')"
+export JULIA_DEPOT_PATH="$PYTHON_PREFIX/julia_depot"
+export PYTHON_JULIAPKG_PROJECT="$PYTHON_PREFIX/julia_env"
+
 python -m pip install --no-cache-dir uv
+uv pip install --requirements "$PYTHON_ROOT/requirements.in"
 
-# Install the current direct dependency set
-uv pip install \
-    --requirements "$PYTHON_ROOT/requirements.in"
+python - <<'PY'
+import juliapkg, pysr
+juliapkg.resolve()
+print(f"PySR version: {pysr.__version__}")
+print(f"Julia executable: {juliapkg.executable()}")
+PY
 
-# Record the updated installed package versions
-python -m pip freeze > "$PYTHON_ROOT/requirements.txt"
+python - <<'PY'
+import juliapkg, subprocess
+julia, project = juliapkg.executable(), juliapkg.project()
+subprocess.run([julia, f"--project={project}", "-e",
+                "using Pkg; Pkg.instantiate(); Pkg.precompile()"], check=True)
+PY
 
-# Remove package caches
+python -m pip freeze > "$PYTHON_ROOT/requirements-$ENV_ARCH.txt"
 rm -rf "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
-```
-
-Make the script executable:
-
-```bash
+EOF
 chmod +x "$PYTHON_ROOT/update4ML.sh"
 ```
 
-### 3. Apply the Update
-
-Request the same architecture as the environment being updated.
-
-For x64:
-
-```bash
-srun --account="$CSC_PROJECT" \
-    --partition=small \
-    --nodes=1 \
-    --ntasks=1 \
-    --cpus-per-task=16 \
-    --time=01:30:00 \
-    --pty bash
-```
-
-For ARM64:
-
-```bash
-sinteractive \
-    --account "$CSC_PROJECT" \
-    --gpu \
-    --cores 36 \
-    --time 01:30:00
-```
-
-Load Tykky:
+Request the **same architecture** node (Section 4), load Tykky, and apply:
 
 ```bash
 module purge
 module load tykky
-```
-
-Configure the temporary build directory:
-
-```bash
 export TMPDIR="$TMP_BUILD_DIR"
 export CW_BUILD_TMPDIR="$TMP_BUILD_DIR"
+mkdir -p "$TMP_BUILD_DIR"
 
-mkdir -p "$TMPDIR"
-```
-
-Apply the update:
-
-```bash
 conda-containerize update \
     --post-install "$PYTHON_ROOT/update4ML.sh" \
     "$ENV_PREFIX"
 ```
 
-Load and validate the updated environment:
+Reload and check:
 
 ```bash
 source "$BASE_SCRATCH/Python4ML.sh"
-
 python --version
 python -m pip freeze
 ```
 
 ---
 
-## Rebuilding the Environment
+## 11. Rebuild / Clean Reinstall
 
-Confirm the target paths:
-
-```bash
-echo "ENV_ARCH=$ENV_ARCH"
-echo "ENV_PREFIX=$ENV_PREFIX"
-echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
-```
-
-Remove the existing environment:
+Same for both a routine rebuild and a from-scratch install — the only difference is whether `$PYTHON_ROOT`'s files already exist.
 
 ```bash
-rm -rf "$ENV_PREFIX"
-```
+# 1) Run the matching Global Configuration block (Section 1) first.
 
-Clear the temporary build directory:
+# 2) Confirm targets
+echo "ENV_ARCH=$ENV_ARCH"; echo "ENV_PREFIX=$ENV_PREFIX"; echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
 
-```bash
-rm -rf "$TMP_BUILD_DIR"
-mkdir -p "$TMP_BUILD_DIR"
-```
-
-Request the same architecture as the environment being rebuilt.
-
-For x64:
-
-```bash
-srun --account="$CSC_PROJECT" \
-    --partition=small \
-    --nodes=1 \
-    --ntasks=1 \
-    --cpus-per-task=16 \
-    --time=01:30:00 \
-    --pty bash
-```
-
-For ARM64:
-
-```bash
-sinteractive \
-    --account "$CSC_PROJECT" \
-    --gpu \
-    --cores 36 \
-    --time 01:30:00
-```
-
-Load Tykky:
-
-```bash
-module purge
-module load tykky
-```
-
-Configure the build directory:
-
-```bash
-export TMPDIR="$TMP_BUILD_DIR"
-export CW_BUILD_TMPDIR="$TMP_BUILD_DIR"
-```
-
-Run the build:
-
-```bash
-conda-containerize new \
-    --prefix "$ENV_PREFIX" \
-    --post-install "$PYTHON_ROOT/extra4ML.sh" \
-    "$PYTHON_ROOT/base4ML.yml"
-```
-
-The rebuild installs the package set defined in `requirements.in` and records the installed versions in `requirements.txt`.
-
----
-
-## Complete Clean Installation
-
-Run the global configuration block for the target architecture.
-
-Confirm the target paths:
-
-```bash
-echo "ENV_ARCH=$ENV_ARCH"
-echo "ENV_PREFIX=$ENV_PREFIX"
-echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
-```
-
-Remove the existing environment and temporary build data for the selected architecture:
-
-```bash
-rm -rf "$ENV_PREFIX"
-rm -rf "$TMP_BUILD_DIR"
-
+# 3) Wipe old env + build cache
+rm -rf "$ENV_PREFIX" "$TMP_BUILD_DIR"
 mkdir -p "$PYTHON_ROOT/envs" "$TMP_BUILD_DIR"
-```
 
-Confirm that these files exist:
-
-```bash
-ls -l \
-    "$PYTHON_ROOT/base4ML.yml" \
-    "$PYTHON_ROOT/requirements.in" \
-    "$PYTHON_ROOT/extra4ML.sh"
-```
-
-Make the installation script executable:
-
-```bash
+# 4) Confirm config files exist (Section 3), then chmod the post-install script
+ls -l "$PYTHON_ROOT/base4ML.yml" "$PYTHON_ROOT/requirements.in" "$PYTHON_ROOT/extra4ML.sh"
 chmod +x "$PYTHON_ROOT/extra4ML.sh"
 ```
 
-Request the same architecture as the environment being installed.
-
-For x64:
-
-```bash
-srun --account="$CSC_PROJECT" \
-    --partition=small \
-    --nodes=1 \
-    --ntasks=1 \
-    --cpus-per-task=16 \
-    --time=01:30:00 \
-    --pty bash
-```
-
-For ARM64:
-
-```bash
-sinteractive \
-    --account "$CSC_PROJECT" \
-    --gpu \
-    --cores 36 \
-    --time 01:30:00
-```
-
-Load Tykky:
+Request a node (Section 4), then build (Section 5):
 
 ```bash
 module purge
 module load tykky
-```
-
-Configure the build directory:
-
-```bash
 export TMPDIR="$TMP_BUILD_DIR"
 export CW_BUILD_TMPDIR="$TMP_BUILD_DIR"
-```
 
-Build the environment:
-
-```bash
 conda-containerize new \
     --prefix "$ENV_PREFIX" \
     --post-install "$PYTHON_ROOT/extra4ML.sh" \
     "$PYTHON_ROOT/base4ML.yml"
 ```
 
-Create the architecture-aware loader:
-
-```bash
-cat <<'EOF' > "$BASE_SCRATCH/Python4ML.sh"
-#!/bin/bash
-
-# Project configuration
-export CSC_PROJECT="project_xxxxxxx"
-export PROJECT_USER_DIR="Harry"
-export ENV_NICKNAME="Dumbledore"
-
-# Derived paths
-export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
-export PYTHON_ROOT="$BASE_SCRATCH/Python"
-
-# Select the matching Tykky environment for the current node architecture
-case "$(uname -m)" in
-    x86_64)
-        export ENV_ARCH="x64"
-        export KERNEL_ARCH="x86_64"
-        ;;
-    aarch64)
-        export ENV_ARCH="arm64"
-        export KERNEL_ARCH="aarch64"
-        ;;
-    *)
-        echo "Unsupported architecture: $(uname -m)"
-        return 1
-        ;;
-esac
-
-export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
-
-# Tykky executable path
-export PATH="$ENV_PREFIX/bin:$PATH"
-
-# Jupyter kernel metadata
-export JUPYTER_KERNEL_NAME="$ENV_NICKNAME-ml-$KERNEL_ARCH"
-export JUPYTER_KERNEL_DISPLAY="Python 3.12 ($ENV_NICKNAME ML $KERNEL_ARCH)"
-
-# Architecture-specific Jupyter user data directory
-export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share/$KERNEL_ARCH}"
-export JUPYTER_KERNEL_DIR="$XDG_DATA_HOME/jupyter/kernels/$JUPYTER_KERNEL_NAME"
-
-# Select JAX backend
-case "$ENV_ARCH" in
-    x64)
-        export JAX_PLATFORMS="cpu"
-        ;;
-    arm64)
-        export JAX_PLATFORMS="cuda"
-        ;;
-esac
-EOF
-```
-
-Make the loader executable:
-
-```bash
-chmod +x "$BASE_SCRATCH/Python4ML.sh"
-```
-
-Edit the loader and replace `project_xxxxxxx`, `Harry`, and `Dumbledore` with your actual values.
-
-Load and validate:
-
-```bash
-source "$BASE_SCRATCH/Python4ML.sh"
-
-python --version
-
-python -c "
-import jax
-import equinox
-import numpy
-import onnx
-import optax
-
-print('ML environment is ready.')
-print(jax.devices())
-"
-```
+If `Python4ML.sh` doesn't exist yet, create it (Section 6).
 
 ---
 
-## Troubleshooting
+## 12. Troubleshooting
 
-### Total Environment Reset
-
+**Total reset:**
 ```bash
-echo "ENV_PREFIX=$ENV_PREFIX"
-echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
-
-rm -rf "$ENV_PREFIX"
-rm -rf "$TMP_BUILD_DIR"
+rm -rf "$ENV_PREFIX" "$TMP_BUILD_DIR"
 mkdir -p "$TMP_BUILD_DIR"
 ```
+Then rebuild per Section 11 on the matching architecture.
 
-Run the normal Tykky build again on the matching architecture.
+**`requirements-$ENV_ARCH.txt` missing** — it's only generated after a completed install; run a full build (Section 5).
 
-### `requirements.txt` Is Missing
+**Package install fails** — edit `requirements.in`, remove/replace the offending package, rebuild.
 
-The file is generated after package installation.
+**Home quota exceeded during build** — make sure Section 1's Global Configuration ran first; caches redirect to `$BASE_SCRATCH/.tykky_runtime_x64` / `_arm64`, not `$HOME`.
 
-Run a complete build:
+**Architecture mismatch** (e.g. `the image's architecture (amd64) could not run on the host's (arm64)`) — build and use the matching-architecture environment; there is no cross-architecture container.
 
-```bash
-module purge
-module load tykky
+**JAX reports no GPU** — the loader sets `JAX_PLATFORMS=cpu` on x64 and `JAX_PLATFORMS=cuda` on arm64 automatically. Avoid manually setting `JAX_PLATFORMS=gpu`; it can trigger backend discovery paths that aren't valid on the target system. For GPU, you also need an actual GPU allocation.
 
-export TMPDIR="$TMP_BUILD_DIR"
-export CW_BUILD_TMPDIR="$TMP_BUILD_DIR"
-
-conda-containerize new \
-    --prefix "$ENV_PREFIX" \
-    --post-install "$PYTHON_ROOT/extra4ML.sh" \
-    "$PYTHON_ROOT/base4ML.yml"
-```
-
-### Package Installation Fails
-
-Edit the direct dependency file:
-
-```bash
-nano -m "$PYTHON_ROOT/requirements.in"
-```
-
-Remove or replace the package identified in the installation error and repeat the build.
-
-### Package Installation Exceeds the Home Quota
-
-Run the global configuration block before starting the build.
-
-Temporary files and caches are redirected to architecture-specific scratch paths:
-
-```text
-$BASE_SCRATCH/.tykky_runtime_x64
-$BASE_SCRATCH/.tykky_runtime_arm64
-```
-
-### Container Architecture Mismatch
-
-If an environment built on an x64 node is used on a Roihu GPU node, execution may fail with an error similar to:
-
-```text
-the image's architecture (amd64) could not run on the host's (arm64)
-```
-
-Build and use a separate ARM64 environment on the Roihu GPU node.
-
-If an ARM64 environment is used on an x64 CPU node, build and use the x64 environment instead.
-
-### JAX Reports No GPU
-
-For CPU execution:
-
-```bash
-export JAX_PLATFORMS="cpu"
-```
-
-For GPU execution, run inside a GPU allocation and use the ARM64 environment on Roihu GPU nodes.
-
-The architecture-aware loader sets:
-
-```text
-x64    -> JAX_PLATFORMS=cpu
-arm64  -> JAX_PLATFORMS=cuda
-```
-
-Avoid setting `JAX_PLATFORMS=gpu`, because it may trigger backend discovery paths that are not valid on the target system.
-
-### Import Errors After an Update
-
-Remove the environment and perform a complete rebuild:
-
-```bash
-echo "ENV_PREFIX=$ENV_PREFIX"
-echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
-
-rm -rf "$ENV_PREFIX"
-rm -rf "$TMP_BUILD_DIR"
-mkdir -p "$TMP_BUILD_DIR"
-```
-
-Then run the normal Tykky build on the matching architecture.
-
-### Compiler Linkage Errors
-
-Remove the current environment and rebuild it from the configuration files:
-
-```bash
-echo "ENV_PREFIX=$ENV_PREFIX"
-echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
-
-rm -rf "$ENV_PREFIX"
-rm -rf "$TMP_BUILD_DIR"
-mkdir -p "$TMP_BUILD_DIR"
-```
-
-Load Tykky and repeat the build.
+**Import errors after an update / compiler linkage errors** — remove `$ENV_PREFIX` and `$TMP_BUILD_DIR`, and do a full rebuild (Section 11) rather than another `update`.
 
 ---
 
 ## Notes
 
-* The environment uses Python 3.12.
-* Roihu CPU nodes use x64 / amd64.
-* Roihu GPU nodes use ARM64 / aarch64.
-* Build a separate Tykky environment for each architecture that you need to use.
-* Do not expect an x64 Tykky container to run on Roihu GPU nodes.
-* Do not expect an ARM64 Tykky container to run on Roihu CPU nodes.
-* `Harry` and `Dumbledore` are fictional placeholder values used in the public documentation.
-* Replace `Harry` with the actual personal or shared directory under the CSC project.
-* Replace `Dumbledore` with the preferred environment nickname.
-* `PROJECT_USER_DIR` is not necessarily the same as the CSC login username.
-* Dependency installation runs inside the Tykky Python 3.12 build environment.
-* No external Conda, Miniforge, Mamba, Python module, or virtual environment is required.
-* `requirements.in` contains the direct dependency specifications.
-* `requirements.txt` records the package versions installed during the build.
-* New builds from `requirements.in` may install newer compatible versions.
-* Use the recorded `requirements.txt` when an exact package set must be reproduced.
-* `jax[cuda12]` installs the CUDA 12-compatible JAX package set.
-* The architecture-aware loader sets `JAX_PLATFORMS=cpu` on x64 nodes and `JAX_PLATFORMS=cuda` on ARM64 nodes.
-* Avoid setting `JAX_PLATFORMS=gpu`.
-* GPU execution requires a GPU allocation and compatible host drivers.
-* Use compute nodes for package installation and environment builds.
-* Avoid performing large package installations directly on CSC login nodes.
+* Python 3.12, built separately per architecture (x64, arm64) — never mix containers across architectures.
+* `Harry` / `Dumbledore` / `project_xxxxxxx` are fictional placeholders — replace consistently in **every** script, including `Python4ML.sh`.
+* `PROJECT_USER_DIR` is not necessarily your CSC login username; it's just the directory under the project's scratch space.
+* `requirements.in` = direct specs (unpinned by design); `requirements.txt` / `requirements-$ENV_ARCH.txt` = exact installed versions. Use the latter when an exact set must be reproduced.
+* `jax[cuda12]` installs the CUDA 12–compatible JAX build.
+* PySR's Julia dependency is resolved and precompiled **at build time** inside `extra4ML.sh` / `update4ML.sh`; `PYTHON_JULIAPKG_OFFLINE=yes` at runtime prevents any accidental re-download.
+* Use compute nodes for the actual container build; consider the login node only for download-heavy steps if a compute allocation's network access is the bottleneck — check your project's policy first.
