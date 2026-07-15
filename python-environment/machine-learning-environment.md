@@ -467,7 +467,8 @@ export JULIA_DEPOT_PATH="$PYTHON_PREFIX/julia_depot"
 
 # Use the Julia runtime and project already packaged inside Tykky.
 # Setting both variables disables JuliaPkg runtime resolution and lock creation.
-export PYTHON_JULIACALL_EXE="$JULIA_DEPOT_PATH/pyjuliapkg/install/bin/julia"
+export PYTHON_JULIACALL_EXE="$PYTHON_PREFIX/julia_env/pyjuliapkg/install/bin/julia"
+export PYTHON_JULIACALL_PROJECT="$PYTHON_PREFIX/julia_env"
 export PYTHON_JULIACALL_PROJECT="$PYTHON_PREFIX/julia_env"
 export PYTHON_JULIACALL_THREADS="${SLURM_CPUS_PER_TASK:-auto}"
 unset PYTHON_JULIAPKG_PROJECT
