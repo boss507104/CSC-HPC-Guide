@@ -680,55 +680,194 @@ export PIP_CACHE_DIR="$CW_BUILD_TMPDIR/.pip_cache"
 export UV_CACHE_DIR="$CW_BUILD_TMPDIR/.uv_cache"
 export UV_LINK_MODE=copy
 export UV_CONCURRENT_DOWNLOADS=4
+
 mkdir -p "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
 
 PYTHON_PREFIX="$(python -c 'import sys; print(sys.prefix)')"
+
 export JULIA_DEPOT_PATH="$PYTHON_PREFIX/julia_depot"
 export PYTHON_JULIAPKG_PROJECT="$PYTHON_PREFIX/julia_env"
 
 python -m pip install --no-cache-dir uv
-uv pip install --requirements "$PYTHON_ROOT/requirements.in"
 
+# Install the complete direct dependency set
+uv pip install \
+    --requirements "$PYTHON_ROOT/requirements.in"
+
+# Explicitly upgrade the packages requested through ml-update
+UPDATE_REQUEST="$PYTHON_ROOT/.ml-update-$ENV_ARCH.txt"
+
+if [ -s "$UPDATE_REQUEST" ]; then
+    mapfile -t UPDATE_PACKAGES < "$UPDATE_REQUEST"
+
+    uv pip install \
+        --upgrade \
+        "${UPDATE_PACKAGES[@]}"
+fi
+
+# Keep the packaged Julia environment ready for PySR
 python - <<'PY'
-import juliapkg, pysr
+import juliapkg
+import pysr
+
 juliapkg.resolve()
-print(f"PySR version: {pysr.__version__}")
+
+print(f"PySR version:     {pysr.__version__}")
 print(f"Julia executable: {juliapkg.executable()}")
+print(f"Julia project:    {juliapkg.project()}")
 PY
 
 python - <<'PY'
-import juliapkg, subprocess
-julia, project = juliapkg.executable(), juliapkg.project()
-subprocess.run([julia, f"--project={project}", "-e",
-                "using Pkg; Pkg.instantiate(); Pkg.precompile()"], check=True)
+import juliapkg
+import subprocess
+
+julia = juliapkg.executable()
+project = juliapkg.project()
+
+subprocess.run(
+    [
+        julia,
+        f"--project={project}",
+        "-e",
+        "using Pkg; Pkg.instantiate(); Pkg.precompile()",
+    ],
+    check=True,
+)
 PY
 
 python -m pip freeze > "$PYTHON_ROOT/requirements-$ENV_ARCH.txt"
+
+rm -f "$UPDATE_REQUEST"
 rm -rf "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
 EOF
+
 chmod +x "$PYTHON_ROOT/update4ML.sh"
+```
+
+Create the ml-update Command:
+
+```bash
+mkdir -p "$HOME/bin"
+
+cat <<'EOF' > "$HOME/bin/ml-update"
+#!/bin/bash -l
+set -e
+
+if [ "$#" -eq 0 ]; then
+    echo "Usage: ml-update <package> [package ...]"
+    exit 1
+fi
+
+if [ -z "${SLURM_JOB_ID:-}" ]; then
+    echo "Run ml-update inside a matching Slurm compute-node allocation."
+    exit 1
+fi
+
+# --- USER CONFIGURATION START ---
+export CSC_PROJECT="project_xxxxxxx"
+export PROJECT_USER_DIR="Harry"
+export ENV_NICKNAME="Dumbledore"
+# --- USER CONFIGURATION END ---
+
+export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
+export PYTHON_ROOT="$BASE_SCRATCH/Python"
+
+case "$(uname -m)" in
+    x86_64)
+        export ENV_ARCH="x64"
+        ;;
+    aarch64)
+        export ENV_ARCH="arm64"
+        ;;
+    *)
+        echo "Unsupported architecture: $(uname -m)"
+        exit 1
+        ;;
+esac
+
+export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
+export TMP_BUILD_DIR="$BASE_SCRATCH/.tykky_runtime_$ENV_ARCH"
+export UPDATE_REQUEST="$PYTHON_ROOT/.ml-update-$ENV_ARCH.txt"
+
+if [ ! -d "$ENV_PREFIX" ]; then
+    echo "Environment not found:"
+    echo "$ENV_PREFIX"
+    exit 1
+fi
+
+if [ ! -f "$PYTHON_ROOT/requirements.in" ]; then
+    echo "requirements.in not found:"
+    echo "$PYTHON_ROOT/requirements.in"
+    exit 1
+fi
+
+printf '%s\n' "$@" > "$UPDATE_REQUEST"
+
+for package in "$@"; do
+    PACKAGE_NAME="$(printf '%s\n' "$package" | sed -E 's/\[.*//; s/[<>=!~].*//')"
+
+    if grep -Eq "^${PACKAGE_NAME}(\[.*\])?([<>=!~].*)?$" "$PYTHON_ROOT/requirements.in"; then
+        sed -i -E \
+            "s|^${PACKAGE_NAME}(\[.*\])?([<>=!~].*)?$|${package}|" \
+            "$PYTHON_ROOT/requirements.in"
+
+        echo "Updated requirement: $package"
+    else
+        echo "$package" >> "$PYTHON_ROOT/requirements.in"
+        echo "Added requirement: $package"
+    fi
+done
+
+module purge
+module load tykky
+
+export TMPDIR="$TMP_BUILD_DIR"
+export CW_BUILD_TMPDIR="$TMP_BUILD_DIR"
+
+mkdir -p "$TMP_BUILD_DIR"
+
+echo
+echo "Architecture: $ENV_ARCH"
+echo "Environment:  $ENV_PREFIX"
+echo "Packages:     $*"
+echo
+
+conda-containerize update \
+    --post-install "$PYTHON_ROOT/update4ML.sh" \
+    "$ENV_PREFIX"
+
+echo
+echo "Update completed."
+echo "Recorded packages:"
+echo "$PYTHON_ROOT/requirements-$ENV_ARCH.txt"
+EOF
+
+chmod +x "$HOME/bin/ml-update"
+```
+
+```bash
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 Request the **same architecture** node (Section 4), load Tykky, and apply:
 
 ```bash
-module purge
-module load tykky
-export TMPDIR="$TMP_BUILD_DIR"
-export CW_BUILD_TMPDIR="$TMP_BUILD_DIR"
-mkdir -p "$TMP_BUILD_DIR"
-
-conda-containerize update \
-    --post-install "$PYTHON_ROOT/update4ML.sh" \
-    "$ENV_PREFIX"
+ml-update tensorflow
+ml-update "tensorflow>=2.20"
+ml-update scipy
 ```
 
 Reload and check:
 
 ```bash
 source "$BASE_SCRATCH/Python4ML.sh"
-python --version
-python -m pip freeze
+python - <<'PY'
+import tensorflow as tf
+
+print(f"TensorFlow: {tf.__version__}")
+print(tf.config.list_physical_devices())
+PY
 ```
 
 ---
