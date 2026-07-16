@@ -320,7 +320,12 @@ vtk
 
 # --- Config & CLI ---
 hydra-core
+pydantic
 PyYAML
+
+# --- Profiling & Logging ---
+loguru
+pyinstrument
 
 # --- HPC / Slurm ---
 submitit
