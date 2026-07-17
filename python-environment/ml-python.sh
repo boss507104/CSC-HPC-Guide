@@ -1,16 +1,19 @@
 #!/bin/bash
 # ml-python.sh
-# Interactive installer for the ML Tykky environment + ml-update command
-# (Sections 0, 1, 3, 5, 6, 10 only).
+# Interactive installer for the ML Tykky environment + ml-update command +
+# Jupyter kernel registration (Sections 0, 1, 3, 5, 6, 7, 10 only).
 # Intended location: /scratch/$CSC_PROJECT/$PROJECT_USER_DIR/ml-python.sh
 # Intended to be run directly on the LOGIN NODE, per explicit request.
 #
 # This script performs INSTALLATION ONLY. It intentionally skips:
-#   - Jupyter kernel registration   (guide Section 7)
-#   - Environment validation        (guide Section 8)
+#   - Environment validation         (guide Section 8)
 #   - Dependency file workflow notes (guide Section 9, doc only)
-#   - Rebuild / troubleshooting     (guide Sections 11-12)
+#   - Rebuild / troubleshooting      (guide Sections 11-12)
 # Those remain manual steps from the full guide if/when you need them.
+#
+# Run this once per architecture (once on a CPU/login node for x64, once
+# on a Roihu GPU node for arm64) to match the guide's per-architecture
+# build + kernel registration flow.
 
 set -e
 
@@ -142,6 +145,22 @@ if [ "$ENV_ARCH" = "arm64" ] && [ "$HOST_ARCH" != "aarch64" ]; then
     echo
 fi
 
+if [ "$ENV_ARCH" = "x64" ] && [ "$HOST_ARCH" = "aarch64" ]; then
+    echo "WARNING: You selected cpu/x64, but this host reports architecture"
+    echo "         '$HOST_ARCH' (aarch64/ARM64), not x86_64."
+    echo
+    echo "Tykky builds native binaries for whatever host it actually runs"
+    echo "on — building here would produce ARM64 binaries mislabelled as"
+    echo "x64, which will fail confusingly on a real x86_64 node later."
+    echo
+    read -p "Continue anyway? [y/N]: " CONFIRM_ARCH2
+    case "$CONFIRM_ARCH2" in
+        y|Y|yes|YES) ;;
+        *) echo "Aborted."; exit 1 ;;
+    esac
+    echo
+fi
+
 read -p "Proceed with installation using the values above? [y/N]: " CONFIRM_ALL
 case "$CONFIRM_ALL" in
     y|Y|yes|YES) ;;
@@ -152,15 +171,15 @@ echo
 # ------------------------------------------------------------------
 # Step 3: Write the shared identity file (guide Section 0)
 # ------------------------------------------------------------------
-echo "[1/8] Writing identity file..."
+echo "[1/9] Writing identity file..."
 
 mkdir -p "$HOME/.config/csc-hpc"
 
 if [ -f "$HOME/.config/csc-hpc/identity.sh" ]; then
     echo "      Identity file already exists — overwriting with the values"
     echo "      entered above. If you already set this up for the SmartSim"
-    echo "      stack, make sure CSC_PROJECT/PROJECT_USER_DIR/ENV_NICKNAME"
-    echo "      still match what you intend to use there."
+    echo "      stack, or for the OTHER architecture of this ML stack, make"
+    echo "      sure CSC_PROJECT/PROJECT_USER_DIR/ENV_NICKNAME still match."
 fi
 
 cat <<EOF > "$HOME/.config/csc-hpc/identity.sh"
@@ -178,7 +197,7 @@ echo
 # ------------------------------------------------------------------
 # Step 4: Global Configuration (guide Section 1.1 / 1.2)
 # ------------------------------------------------------------------
-echo "[2/8] Setting up paths..."
+echo "[2/9] Setting up paths..."
 
 source "$HOME/.config/csc-hpc/identity.sh"
 
@@ -199,7 +218,7 @@ echo
 # ------------------------------------------------------------------
 # Step 5: Create configuration files (guide Section 3)
 # ------------------------------------------------------------------
-echo "[3/8] Creating configuration files..."
+echo "[3/9] Creating configuration files..."
 cd "$PYTHON_ROOT"
 
 cat <<'EOF' > "$PYTHON_ROOT/base4ML.yml"
@@ -412,7 +431,7 @@ echo
 # ------------------------------------------------------------------
 # Step 6: Build the Tykky environment (guide Section 5, on login node)
 # ------------------------------------------------------------------
-echo "[4/8] Building the Tykky environment on the login node..."
+echo "[4/9] Building the Tykky environment on the login node..."
 echo "      (this can take a long time — installing a large scientific stack + Julia)"
 echo
 
@@ -440,7 +459,7 @@ echo
 # ------------------------------------------------------------------
 # Step 7: Create the loader (guide Section 6) so the env is usable
 # ------------------------------------------------------------------
-echo "[5/8] Creating loader Python4ML.sh..."
+echo "[5/9] Creating loader Python4ML.sh..."
 
 cat <<'EOF' > "$BASE_SCRATCH/Python4ML.sh"
 #!/bin/bash
@@ -534,9 +553,9 @@ echo "      -> $BASE_SCRATCH/Python4ML.sh"
 echo
 
 # ------------------------------------------------------------------
-# Step 8: Create update4ML.sh (guide Section 10, post-install script)
+# Step 8: Create update4ML.sh + ml-update command (guide Section 10)
 # ------------------------------------------------------------------
-echo "[6/8] Creating update4ML.sh..."
+echo "[6/9] Creating update4ML.sh..."
 
 cat <<'EOF' > "$PYTHON_ROOT/update4ML.sh"
 #!/bin/bash
@@ -616,10 +635,7 @@ chmod +x "$PYTHON_ROOT/update4ML.sh"
 echo "      -> $PYTHON_ROOT/update4ML.sh"
 echo
 
-# ------------------------------------------------------------------
-# Step 9: Create the ml-update command (guide Section 10)
-# ------------------------------------------------------------------
-echo "[7/8] Creating ml-update command..."
+echo "[7/9] Creating ml-update command..."
 
 mkdir -p "$HOME/bin"
 
@@ -723,6 +739,56 @@ grep -qxF 'export PATH="$HOME/bin:$PATH"' "$HOME/.bashrc" || \
 echo "      -> Added \$HOME/bin to PATH in ~/.bashrc (if not already present)"
 echo
 
+# ------------------------------------------------------------------
+# Step 9: Register the Jupyter kernel (guide Section 7)
+# ------------------------------------------------------------------
+echo "[8/9] Registering the Jupyter kernel for this architecture..."
+
+# Source the loader we just wrote — this is what derives
+# JUPYTER_KERNEL_DIR / JUPYTER_KERNEL_NAME / JUPYTER_KERNEL_DISPLAY /
+# JAX_PLATFORMS / PYTHON_JULIAPKG_PROJECT / JULIA_DEPOT_PATH for the
+# architecture we just built on THIS node.
+source "$BASE_SCRATCH/Python4ML.sh"
+
+mkdir -p "$JUPYTER_KERNEL_DIR"
+
+cat <<EOF > "$JUPYTER_KERNEL_DIR/kernel.json"
+{
+  "argv": [
+    "$ENV_PREFIX/bin/python",
+    "-m",
+    "ipykernel_launcher",
+    "-f",
+    "{connection_file}"
+  ],
+  "display_name": "$JUPYTER_KERNEL_DISPLAY",
+  "language": "python",
+  "metadata": {
+    "debugger": true
+  },
+  "env": {
+    "JAX_PLATFORMS": "$JAX_PLATFORMS",
+    "PYTHON_JULIAPKG_PROJECT": "$PYTHON_JULIAPKG_PROJECT",
+    "JULIA_DEPOT_PATH": "$JULIA_DEPOT_PATH",
+    "PYTHON_JULIAPKG_OFFLINE": "yes",
+    "PYTHON_JULIACALL_THREADS": "auto"
+  }
+}
+EOF
+
+echo "      -> $JUPYTER_KERNEL_DIR/kernel.json"
+echo "      Registered kernel: $JUPYTER_KERNEL_NAME"
+echo
+
+if command -v jupyter >/dev/null 2>&1; then
+    jupyter kernelspec list 2>/dev/null || true
+else
+    echo "      (jupyter CLI not on PATH in this shell — kernel.json was still"
+    echo "       written correctly; 'jupyter kernelspec list' will show it once"
+    echo "       run from inside the loaded environment.)"
+fi
+echo
+
 echo "=================================================================="
 echo " Installation complete."
 echo "=================================================================="
@@ -735,8 +801,14 @@ echo "then update/add packages with, e.g.:"
 echo "    ml-update tensorflow"
 echo "    ml-update \"tensorflow>=2.20\""
 echo
+echo "In VS Code, after registering, reload the remote window:"
+echo "    Command Palette -> Developer: Reload Window"
+echo
+echo "If you're setting up BOTH architectures, run this script again on"
+echo "the OTHER node type (CPU/login for x64, Roihu GPU for arm64) with"
+echo "the SAME identity values, to register that architecture's kernel too."
+echo
 echo "Skipped (not part of installation — see the full guide if needed):"
-echo "  - Jupyter kernel registration    (guide Section 7)"
 echo "  - Environment validation         (guide Section 8)"
 echo "  - Dependency file workflow notes (guide Section 9, doc only)"
 echo "  - Rebuild / troubleshooting      (guide Sections 11-12)"
