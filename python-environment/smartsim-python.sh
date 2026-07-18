@@ -318,6 +318,8 @@ echo "[2/10] Setting up paths..."
 
 source "$HOME/.config/csc-hpc/identity.sh"
 
+export ENV_ARCH="$ENV_ARCH" 
+
 export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
 export PYTHON_BASE="$BASE_SCRATCH/Python"
 export PYTHON_ROOT="$PYTHON_BASE/PythonSmartSim"
