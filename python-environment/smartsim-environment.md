@@ -501,7 +501,11 @@ config_file.write_text(json.dumps(config, indent=4) + "\n")
 print(f"Wrote SmartSim Linux ARM64 CPU config: {config_file}")
 PY
 
-# --- Build Redis and RedisAI without ML runtime backends ---
+# --- Build Redis and the RedisAI module without ML runtime backends ---
+# `smart build` defaults to building ALL backends (Torch, TensorFlow, ONNX)
+# unless explicitly skipped. --skip-torch/--skip-tensorflow/--skip-onnx are
+# the flags accepted by this smartsim==0.8.0 CLI; --no_tf/--no_pt and
+# --skip-backends were both rejected with "unrecognized arguments" here.
 export USE_SYSTEMD=no
 
 env CFLAGS="-Wno-incompatible-pointer-types" \
@@ -514,8 +518,9 @@ env CFLAGS="-Wno-incompatible-pointer-types" \
     USE_SYSTEMD=no \
     smart build \
         --device cpu \
-        --no_tf \
-        --no_pt
+        --skip-torch \
+        --skip-tensorflow \
+        --skip-onnx
 
 # Restore packages potentially disturbed by the SmartSim database build
 uv pip install \
@@ -1026,7 +1031,8 @@ config = {
 config_file.write_text(json.dumps(config, indent=4) + "\n")
 PY
 
-# Rebuild Redis and RedisAI without ML runtime backends
+# Rebuild Redis and the RedisAI module without ML runtime backends
+# (see the matching comment in extra4SmartSim.sh)
 export USE_SYSTEMD=no
 
 env \
@@ -1041,8 +1047,9 @@ env \
     USE_SYSTEMD=no \
     smart build \
         --device cpu \
-        --no_tf \
-        --no_pt
+        --skip-torch \
+        --skip-tensorflow \
+        --skip-onnx
 
 # Restore the constrained dependency set after smart build
 uv pip install \
@@ -1311,7 +1318,7 @@ Rebuild it:
 ```bash
 export USE_SYSTEMD=no
 smart clobber
-smart build --device cpu --no_tf --no_pt
+smart build --device cpu --skip-torch --skip-tensorflow --skip-onnx
 ```
 then restore packages: `uv pip install --link-mode=copy --requirements "$PYTHON_ROOT/requirements.in" && uv pip check`.
 
@@ -1371,3 +1378,4 @@ RedisAI model execution (`set_model`, `set_model_from_file`, `run_model`) is not
 * Prefer a full rebuild over repeated incremental updates once the dependency set changes substantially.
 * If migrating from the old flat `Python/` layout, do the one-time move in Section 1.3 before sourcing the loader — do not run both layouts in parallel.
 * The identity file (Section 0) and the directory-layout migration (Section 1.3) are independent — you can adopt either one without the other.
+* **`smart build` rejects the flags in this guide with "unrecognized arguments"** — `smart build`'s accepted flags have changed between SmartSim doc revisions and possibly between patch releases. This guide currently uses `--skip-torch --skip-tensorflow --skip-onnx`, which worked against the `smartsim==0.8.0` CLI installed by this pipeline. If a future rebuild rejects these, run `smart build --help` inside the build environment (right after `smart clobber`, before the failing `smart build` call) to get the ground-truth flag list for whatever version actually got installed, and update both `extra4SmartSim.sh` and `update4SmartSim.sh` accordingly — do not trust cached documentation, including this guide, over that output.
