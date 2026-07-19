@@ -426,8 +426,8 @@ sympy
 tensorly
 
 # --- Custom Utilities ---
-DataGraph @ git+https://github.com/boss507104/DataGraph.git#subdirectory=DataGraph
-eqx_io @ git+https://github.com/boss507104/CSC-HPC-Guide.git#subdirectory=utilities/eqx4smartredis
+DataGraph @ git+https://github.com/PentagonToy/DataGraph.git#subdirectory=DataGraph
+eqx_io @ git+https://github.com/PentagonToy/CSC-HPC-Guide.git#subdirectory=utilities/eqx4smartredis
 
 # --- Config, Logging & Profiling ---
 pydantic
@@ -490,7 +490,7 @@ uv pip install \
 # --- Patched SmartRedis Python client (both architectures) ---
 rm -rf "$CW_BUILD_TMPDIR/SmartRedis"
 git clone \
-    https://github.com/boss507104/SmartRedis.git \
+    https://github.com/PentagonToy/SmartRedis.git \
     "$CW_BUILD_TMPDIR/SmartRedis"
 cd "$CW_BUILD_TMPDIR/SmartRedis"
 
@@ -659,7 +659,7 @@ echo "      $SMARTREDIS_DIR"
 rm -rf "$SMARTREDIS_DIR"
 
 git clone \
-    https://github.com/boss507104/SmartRedis.git \
+    https://github.com/PentagonToy/SmartRedis.git \
     "$SMARTREDIS_DIR"
 
 cd "$SMARTREDIS_DIR"
@@ -809,7 +809,7 @@ fi
 rm -rf "$CW_BUILD_TMPDIR/SmartRedis"
 
 git clone \
-    https://github.com/boss507104/SmartRedis.git \
+    https://github.com/PentagonToy/SmartRedis.git \
     "$CW_BUILD_TMPDIR/SmartRedis"
 
 cd "$CW_BUILD_TMPDIR/SmartRedis"
