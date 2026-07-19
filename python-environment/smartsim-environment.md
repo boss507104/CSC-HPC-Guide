@@ -56,7 +56,7 @@ requirements-$ENV_ARCH.txt Installed-state snapshot recorded after a successful 
 
 SmartSim is installed **after** the patched SmartRedis Python client on both architectures, because `smartsim==0.8.0` otherwise tries to pull the incomplete PyPI `smartredis==0.6.1` sdist. Immediately after, on arm64 only, the platform/config patch is applied (Section 3.3). `smart build` then runs on **both** architectures; `requirements.in` is reapplied afterward as a conservative restoration step, since the build can perturb already-installed packages.
 
-Part of the [CSC Environment Helpers Framework](https://github.com/boss507104/CSCEnvironmentHelpers). Production examples live in [SmartSim4CSC](https://github.com/boss507104/SmartSim4CSC).
+Part of the [CSC Environment Helpers Framework](https://github.com/PentagonToy/CSCEnvironmentHelpers). Production examples live in [SmartSim4CSC](https://github.com/PentagonToy/SmartSim4CSC).
 
 ---
 
@@ -338,8 +338,8 @@ sympy
 tensorly
 
 # --- Custom Utilities ---
-DataGraph @ git+https://github.com/boss507104/DataGraph.git#subdirectory=DataGraph
-eqx_io @ git+https://github.com/boss507104/CSC-HPC-Guide.git#subdirectory=utilities/eqx4smartredis
+DataGraph @ git+https://github.com/PentagonToy/DataGraph.git#subdirectory=DataGraph
+eqx_io @ git+https://github.com/PentagonToy/CSC-HPC-Guide.git#subdirectory=utilities/eqx4smartredis
 
 # --- Config, Logging & Profiling ---
 pydantic
@@ -411,7 +411,7 @@ uv pip install \
 # --- Patched SmartRedis Python client (both architectures) ---
 rm -rf "$CW_BUILD_TMPDIR/SmartRedis"
 git clone \
-    https://github.com/boss507104/SmartRedis.git \
+    https://github.com/PentagonToy/SmartRedis.git \
     "$CW_BUILD_TMPDIR/SmartRedis"
 cd "$CW_BUILD_TMPDIR/SmartRedis"
 
@@ -624,7 +624,7 @@ cd "$BASE_SCRATCH"
 rm -rf "$SMARTREDIS_DIR"
 
 git clone \
-    https://github.com/boss507104/SmartRedis.git \
+    https://github.com/PentagonToy/SmartRedis.git \
     "$SMARTREDIS_DIR"
 
 cd "$SMARTREDIS_DIR"
@@ -854,7 +854,7 @@ fi
 
 rm -rf "$CW_BUILD_TMPDIR/SmartRedis"
 git clone \
-    https://github.com/boss507104/SmartRedis.git \
+    https://github.com/PentagonToy/SmartRedis.git \
     "$CW_BUILD_TMPDIR/SmartRedis"
 cd "$CW_BUILD_TMPDIR/SmartRedis"
 
@@ -1157,7 +1157,7 @@ For workloads that split across node types (e.g. an x64 CPU node feeding data to
 
 Other typical workflows: launching OpenFOAM solvers + Python producers/consumers through Slurm; linking external C++/Fortran solvers against the native SmartRedis client; validating producer/consumer config with `pydantic`, logging with `loguru`, profiling with `pyinstrument`.
 
-RedisAI model execution (`set_model`, `run_model`) is not used in this workflow — model computation happens in the JAX worker, not inside RedisAI. Full production architecture and Slurm templates: [SmartSim4CSC](https://github.com/boss507104/SmartSim4CSC).
+RedisAI model execution (`set_model`, `run_model`) is not used in this workflow — model computation happens in the JAX worker, not inside RedisAI. Full production architecture and Slurm templates: [SmartSim4CSC](https://github.com/PentagonToy/SmartSim4CSC).
 
 ---
 
