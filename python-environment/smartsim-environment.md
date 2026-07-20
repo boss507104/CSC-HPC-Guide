@@ -289,9 +289,10 @@ pyfoam
 kagglehub
 
 # --- JAX Ecosystem ---
-jax[cuda12]==0.6.2
+jax[cuda12]
 diffrax
 distrax
+distreqx
 equinox
 jaxtyping
 jax2onnx
