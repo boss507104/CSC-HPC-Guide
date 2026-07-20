@@ -1,6 +1,6 @@
 # SmartSim Environment Configuration
 
-Last updated: 21 July 2026
+Last updated: 20 July 2026
 
 > [!TIP]
 > ## One-Command Installation
@@ -48,10 +48,10 @@ A Tykky container built for one architecture will not run on the other. The **Sm
 Python        3.12
 SmartSim      0.8.0 (CSC fork: PentagonToy/SmartSim @ csc-develop)
 SmartRedis    0.6.1-compatible (CSC fork: PentagonToy/SmartRedis @ csc-develop)
-JAX           0.6.2
-TensorFlow    2.18.1 (Python + RedisAI backend)
-PyTorch       2.7.1 (Python; RedisAI executes via LibTorch backend)
-ONNX          resolved (+ ONNX Runtime 1.17.3, tf2onnx, skl2onnx)
+JAX           resolved at build time (CUDA 12 on arm64)
+TensorFlow    2.18.1
+PyTorch       2.7.1
+ONNX          resolved (+ ONNX Runtime, tf2onnx, skl2onnx)
 PySR / Julia  resolved + precompiled at build time (JuliaCall)
 NumPy         >= 2.0
 protobuf      resolved by uv (no longer hard-pinned)
@@ -223,10 +223,10 @@ The `.julia_env_runtime_*` / `.julia_depot_runtime_*` directories aren't created
 | uv | latest at build | Resolution, installation, `uv pip check` |
 | SmartSim | `PentagonToy/SmartSim @ csc-develop` | Orchestration; Redis + RedisAI lifecycle on both architectures |
 | SmartRedis | `PentagonToy/SmartRedis @ csc-develop` | Python client + native C++/Fortran library, both architectures |
-| JAX / Equinox / distrax | 0.6.2, CUDA 12 | Autodiff / training / inference / probabilistic modelling |
+| JAX / Equinox / distrax / distreqx | resolved at build time; CUDA 12 on arm64 | Autodiff / training / inference / probabilistic modelling |
 | TensorFlow | 2.18.1 | Python framework + source for the RedisAI TensorFlow backend |
 | PyTorch | 2.7.1 | Python framework; RedisAI executes via the LibTorch backend |
-| ONNX / ONNX Runtime | resolved / 1.17.3 | Model interchange + RedisAI ONNX Runtime backend |
+| ONNX / ONNX Runtime | resolved at build time | Model interchange + Python-side ONNX Runtime |
 | PySR / julia (JuliaCall) | resolved | Symbolic regression; Julia toolchain resolved and precompiled at build time |
 | shap | resolved | Model explainability |
 | dvc | resolved | Data version control |
@@ -405,7 +405,7 @@ typing-extensions
 EOF
 ```
 
-`tensorflow==2.18.1`, `torch==2.7.1`, and `onnxruntime==1.17.3` are pinned to match the RedisAI backend versions built by `smart build`. `protobuf` and `numpy` are deliberately left unpinned — validate resolved versions with `uv pip check`. `pysr`/`julia` require the resolve/precompile step below — adding them to `requirements.in` alone is not sufficient.
+`tensorflow==2.18.1` and `torch==2.7.1` remain pinned. `jax[cuda12]`, ONNX, ONNX Runtime, `protobuf`, and `numpy` are deliberately left unpinned and resolve to the newest compatible versions at build time. Python-side framework versions do not need to exactly match the RedisAI backend versions built by `smart build`, since they're separate runtime components — validate exported models against the corresponding RedisAI backend (Section 13) rather than assuming version equality. `pysr`/`julia` require the resolve/precompile step below — adding them to `requirements.in` alone is not sufficient.
 
 ### 3.3 `extra4SmartSim.sh` (post-install, runs *inside* the build)
 
@@ -582,7 +582,7 @@ ls -ld "$ENV_PREFIX"
 ls -lh "$PYTHON_ROOT/requirements-$ENV_ARCH.txt"
 ls -lh "$PYTHON_ROOT/julia-environment-$ENV_ARCH.txt"
 
-python -m pip list --format=freeze \
+"$ENV_PREFIX/bin/python" -m pip list --format=freeze \
     | grep -E '^(jax|numpy|tensorflow|torch|onnx|onnxruntime|pysr|smartsim|smartredis)=='
 ```
 
@@ -600,12 +600,20 @@ Request a node (Section 4), then:
 module purge
 ```
 
-Compilers, e.g. Roihu:
+Compilers, e.g. Roihu CPU:
 
 ```bash
+# Roihu CPU
 module load gcc/13.4.0
-module load cmake/3.26.5   # CPU node
-module load cmake/3.31.11  # GPU node
+module load cmake/3.26.5
+```
+
+Roihu GPU:
+
+```bash
+# Roihu GPU
+module load gcc/13.4.0
+module load cmake/3.31.11
 ```
 
 or Mahti:
@@ -657,6 +665,8 @@ ldd "$SMARTREDIS_DIR/install/lib64/libsmartredis-fortran.so"
 
 The loader now also handles PySR's Julia runtime: it copies the in-container Julia *project* into a writable scratch directory every time it's sourced, since the Tykky image is read-only and `juliapkg` needs to write a lock file into the project directory. The Julia *depot* (precompiled packages) stays read-only and layered in via a colon-separated `JULIA_DEPOT_PATH`.
 
+The GCC module for the native SmartRedis library also varies by target system — Roihu and Mahti use different compiler versions, so the loader selects one based on hostname rather than hardcoding a single module.
+
 ```bash
 cat <<'EOF' > "$BASE_SCRATCH/Python4SmartSim.sh"
 #!/bin/bash
@@ -692,8 +702,14 @@ esac
 export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
 export SMARTREDIS_DIR="$BASE_SCRATCH/SmartRedis-$ENV_ARCH"
 
-# Replace with the GCC module used to build SmartRedis on this system
-module load gcc/13.4.0
+# GCC module used to build the native SmartRedis library — this varies by
+# target system, so select it based on hostname rather than hardcoding one.
+case "${HOSTNAME:-}" in
+    *roihu*) module load gcc/13.4.0 ;;
+    *mahti*) module load gcc/13.1.0 ;;
+    *puhti*) echo "Load the GCC module matching your SmartRedis native build before sourcing this loader." ;;
+    *) echo "Unrecognized host — load the GCC module matching your SmartRedis native build before sourcing this loader." ;;
+esac
 
 export PATH="$ENV_PREFIX/bin:$PATH"
 
@@ -756,7 +772,7 @@ EOF
 chmod +x "$BASE_SCRATCH/Python4SmartSim.sh"
 ```
 
-Edit the `gcc/...` line to match your compiler, then load:
+Load it:
 
 ```bash
 source "$BASE_SCRATCH/Python4SmartSim.sh"
@@ -858,7 +874,7 @@ requirements-$ENV_ARCH.txt Installed-state snapshot (excludes SmartSim/SmartRedi
 
 **Add/remove a package** — edit `requirements.in`, then rebuild/update (Section 11 or 12). Removing a package needs a full rebuild to drop unused transitive deps.
 
-**Preserve `jax[cuda12]==0.6.2`**, and keep `tensorflow`/`torch`/`onnxruntime` pins aligned with whatever RedisAI backend versions `smart build` fetches. `protobuf` and `numpy` are intentionally unpinned — verify via `uv pip check`.
+**Keep `jax[cuda12]` unpinned** to pick up the newest compatible JAX release; `tensorflow` and `torch` remain pinned in `requirements.in`, while ONNX/ONNX Runtime/`protobuf`/`numpy` resolve at build time. Python-side TensorFlow/PyTorch/ONNX Runtime versions are independent of the RedisAI backend binaries `smart build` produces — exact equality isn't required, but validate exported models with `set_model`/`run_model` before production use.
 
 **Reproduce an exact installed set** — temporarily point `extra4SmartSim.sh`'s two `uv pip install --requirements ...` lines at `requirements-$ENV_ARCH.txt`, rebuild, then switch back.
 
@@ -1110,7 +1126,7 @@ Rebuild per Section 12.
 
 **`smart build` rejects `--skip-python-packages`** — run `smart build --help` inside the build environment to get the ground-truth flags for whatever version is installed.
 
-**TensorFlow/PyTorch/ONNXRuntime version mismatch between Python and RedisAI backend** — keep `requirements.in`'s pins aligned with the backend versions `smart build` actually fetched.
+**TensorFlow/PyTorch/ONNX Runtime model compatibility with RedisAI** — Python package versions and RedisAI backend versions are separate and don't need to match exactly. Validate actual exported TensorFlow, TorchScript, and ONNX models with `set_model`/`run_model`. If a model uses operators/formats the RedisAI backend doesn't support, re-export with an older compatible opset or framework format.
 
 **uv hardlink warning** — expected; `--link-mode=copy` handles it.
 
@@ -1165,8 +1181,8 @@ Full production architecture and Slurm templates: [SmartSim4CSC](https://github.
 * SmartSim and SmartRedis install from the CSC forks (`PentagonToy/SmartSim`, `PentagonToy/SmartRedis`, `csc-develop` branch), not PyPI — no runtime patching remains in `extra4SmartSim.sh` / `update4SmartSim.sh`.
 * **PySR's Julia dependency is resolved and precompiled at build time**, exactly as in the standalone ML stack: the loader copies the read-only in-container Julia project into a writable scratch directory on every `source`, since `juliapkg` needs to write a lock file there; the Julia depot (precompiled packages) stays read-only and is layered in via `JULIA_DEPOT_PATH`. `PYTHON_JULIAPKG_OFFLINE=yes` prevents any runtime re-download.
 * `smart build` runs identically on both architectures and builds all three RedisAI backends by default; `--skip-python-packages` is used because TensorFlow/PyTorch/ONNX Python packages are already managed via `requirements.in`.
-* `numpy` and `protobuf` are intentionally unpinned — validate resolved versions with `uv pip check`.
+* `jax[cuda12]`, `onnx`, `onnxruntime`, `numpy`, and `protobuf` are intentionally unpinned and resolve to the newest compatible versions at build time. The exact installed versions are recorded in `requirements-$ENV_ARCH.txt` — validate the resolved environment with `uv pip check`.
 * Placeholders (`Harry`/`Dumbledore`/`project_xxxxxxx`) are set once in the identity file (Section 0).
 * `requirements.in` = direct deps, not SmartSim/SmartRedis themselves; `requirements-$ENV_ARCH.txt` = installed-state snapshot, not a lockfile.
 * Every `uv pip install` uses `--link-mode=copy`.
-* The native SmartRedis library (Section 6) is unrelated to `smart build`/RedisAI and the Julia toolchain, and is built on both architectures as usual.
+* The native SmartRedis library (Section 6) is unrelated to `smart build`/RedisAI and the Julia toolchain, and is built on both architectures as usual. The GCC module needed for it varies by target system (Roihu, Mahti, Puhti) — see Section 6/7 rather than assuming one module works everywhere.
