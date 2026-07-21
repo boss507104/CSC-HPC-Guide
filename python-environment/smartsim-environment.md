@@ -1,6 +1,6 @@
 # SmartSim Environment Configuration
 
-Last updated: 20 July 2026
+Last updated: 21 July 2026
 
 > [!TIP]
 > ## One-Command Installation
@@ -32,7 +32,7 @@ SmartSim and SmartRedis install directly from the CSC-maintained forks (`csc-dev
 
 **No post-install source patching is required.** `smart build` runs identically on `x64` and `arm64`, building the RedisAI TensorFlow, ONNX Runtime, and LibTorch backends automatically.
 
-Separately, **PySR's Julia dependency is resolved and precompiled at build time**, exactly as it was in the standalone ML stack: `juliapkg` fetches Julia and the `PythonCall`/`SymbolicRegression` packages inside the Tykky build, and the loader copies the Julia *project* (not the depot) into a writable scratch location at runtime, since the Tykky image itself is read-only and `juliapkg` needs to write a lock file there. `PYTHON_JULIAPKG_OFFLINE=yes` at runtime prevents any accidental re-download.
+Separately, **PySR's Julia dependency is resolved and precompiled at build time**, exactly as it was in the standalone ML stack: `juliapkg` fetches Julia and the `PythonCall`/`SymbolicRegression` packages inside the Tykky build. Immediately after the Tykky build succeeds, the installer copies that packaged Julia *project* **once** into a writable scratch location (the Tykky image itself is read-only and `juliapkg` needs to write a lock file there); the Julia *depot* directory is created alongside it. Sourcing the loader afterwards only points environment variables at these already-prepared directories — it no longer copies or deletes anything. `PYTHON_JULIAPKG_OFFLINE=yes` at runtime prevents any accidental re-download.
 
 RedisAI model execution is available — TensorFlow, ONNX, and PyTorch (via LibTorch) models can be executed with `set_model`/`run_model` — but the primary workflow may still run JAX/Equinox/PySR inference in external Python workers. SmartRedis carries tensors, weights, metrics, and predictions either way.
 
@@ -52,7 +52,7 @@ JAX           resolved at build time (CUDA 12 on arm64)
 TensorFlow    2.18.1
 PyTorch       2.7.1
 ONNX          resolved (+ ONNX Runtime, tf2onnx, skl2onnx)
-PySR / Julia  resolved + precompiled at build time (JuliaCall)
+PySR / Julia  resolved + precompiled at build time (JuliaCall); writable runtime copy prepared once, at build time
 NumPy         >= 2.0
 protobuf      resolved by uv (no longer hard-pinned)
 CMake         resolved (no longer pinned < 3.30.0)
@@ -63,9 +63,10 @@ RedisAI       TensorFlow + ONNX Runtime + LibTorch backends, built on both x64 a
 requirements.in            Human-maintained direct package specifications and compatibility constraints
 requirements-$ENV_ARCH.txt Installed-state snapshot recorded after a successful build (excludes SmartSim/SmartRedis)
 julia-environment-$ENV_ARCH.txt  Julia toolchain + package status recorded after a successful build
+runtime-$ENV_ARCH.sh       GCC module recorded at build time, read by the loader on every source
 ```
 
-Build order: install `uv` → install the full `requirements.in` set (including `pysr`/`julia`, TensorFlow, PyTorch, ONNX) → resolve/precompile Julia+PySR → install SmartRedis (fork) → install SmartSim (fork) → `smart build` (Redis + RedisAI, all backends) → restore `requirements.in` → `uv pip check`.
+Build order: install `uv` → install the full `requirements.in` set (including `pysr`/`julia`, TensorFlow, PyTorch, ONNX) → resolve/precompile Julia+PySR → install SmartRedis (fork) → install SmartSim (fork) → `smart build` (Redis + RedisAI, all backends) → restore `requirements.in` → `uv pip check` → **prepare the writable Julia runtime once** → build the native SmartRedis library and record its GCC module.
 
 Part of the [CSC Environment Helpers Framework](https://github.com/PentagonToy/CSCEnvironmentHelpers). Production examples live in [SmartSim4CSC](https://github.com/PentagonToy/SmartSim4CSC).
 
@@ -84,20 +85,23 @@ Choose target architecture
   |     --> resolve/precompile Julia + PySR
   |     --> install SmartRedis + SmartSim (csc-develop fork)
   |     --> build Tykky env (Redis + RedisAI, all backends, via smart build)
-  |     --> build SmartRedis-x64 native library
+  |     --> prepare writable Julia runtime ONCE (copy julia_env, create depot dir)
+  |     --> build SmartRedis-x64 native library; record GCC module used
   |
   +-- arm64 (Roihu GPU)
         Global Config (arm64) --> install full requirements.in
         --> resolve/precompile Julia + PySR
         --> install SmartRedis + SmartSim (csc-develop fork)
         --> build Tykky env (Redis + RedisAI, all backends — same as x64)
-        --> build SmartRedis-arm64 native library
+        --> prepare writable Julia runtime ONCE (copy julia_env, create depot dir)
+        --> build SmartRedis-arm64 native library; record GCC module used
         --> also runs JAX/Equinox/TensorFlow/PyTorch/PySR training and inference locally
 
 After the required track(s) are built:
   Create Python4SmartSim.sh --> source Python4SmartSim.sh
-  --> loader picks x64/arm64 and matching native library from `uname -m`
-  --> loader also copies the Julia project into a writable scratch location
+  --> loader picks x64/arm64 from `uname -m`, only sets environment variables
+      and PATH/LD_LIBRARY_PATH/CMAKE_PREFIX_PATH (idempotent — safe to re-source)
+  --> Jupyter kernels run through a launcher wrapper that sources the same loader
 ```
 
 Skip the `arm64` track entirely if you never run workloads on Roihu GPU nodes against this stack.
@@ -191,10 +195,10 @@ echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
 /scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities/          # $BASE_SCRATCH
 ├── .tykky_runtime_smartsim_x64/
 ├── .tykky_runtime_smartsim_arm64/
-├── .julia_env_runtime_x64/       # created by the loader at runtime
-├── .julia_env_runtime_arm64/     # created by the loader at runtime
-├── .julia_depot_runtime_x64/     # created by the loader at runtime
-├── .julia_depot_runtime_arm64/   # created by the loader at runtime
+├── .julia_env_runtime_x64/       # created ONCE, right after the Tykky build (Section 5.1)
+├── .julia_env_runtime_arm64/     # created ONCE, right after the Tykky build (Section 5.1)
+├── .julia_depot_runtime_x64/     # created ONCE, right after the Tykky build (Section 5.1)
+├── .julia_depot_runtime_arm64/   # created ONCE, right after the Tykky build (Section 5.1)
 ├── Python4SmartSim.sh
 ├── SmartRedis-x64/                                  # $SMARTREDIS_DIR (x64)
 ├── SmartRedis-arm64/                                # $SMARTREDIS_DIR (arm64)
@@ -208,10 +212,14 @@ echo "TMP_BUILD_DIR=$TMP_BUILD_DIR"
         ├── requirements-arm64.txt
         ├── julia-environment-x64.txt
         ├── julia-environment-arm64.txt
+        ├── runtime-x64.sh          # records the GCC module used for the x64 native build
+        ├── runtime-arm64.sh        # records the GCC module used for the arm64 native build
+        ├── jupyter-kernel-x64.sh   # kernel launcher wrapper (Section 8)
+        ├── jupyter-kernel-arm64.sh # kernel launcher wrapper (Section 8)
         └── envs/
 ```
 
-The `.julia_env_runtime_*` / `.julia_depot_runtime_*` directories aren't created here — they're created (and refreshed) automatically by the loader (Section 7) on every `source`, since the in-container Julia project is read-only and needs a writable copy for `juliapkg`'s lock file.
+The `.julia_env_runtime_*` / `.julia_depot_runtime_*` directories and `runtime-$ENV_ARCH.sh` are created **once**, at build time (Sections 5.1 and 6) — not by the loader. Sourcing `Python4SmartSim.sh` only ever reads them; it never copies, deletes, or recreates them. Re-run the installer for a given architecture if these directories are missing or out of date.
 
 ---
 
@@ -227,7 +235,7 @@ The `.julia_env_runtime_*` / `.julia_depot_runtime_*` directories aren't created
 | TensorFlow | 2.18.1 | Python framework + source for the RedisAI TensorFlow backend |
 | PyTorch | 2.7.1 | Python framework; RedisAI executes via the LibTorch backend |
 | ONNX / ONNX Runtime | resolved at build time | Model interchange + Python-side ONNX Runtime |
-| PySR / julia (JuliaCall) | resolved | Symbolic regression; Julia toolchain resolved and precompiled at build time |
+| PySR / julia (JuliaCall) | resolved | Symbolic regression; Julia toolchain resolved and precompiled at build time, then copied into a writable runtime location once |
 | shap | resolved | Model explainability |
 | dvc | resolved | Data version control |
 | nbconvert / papermill | resolved | Notebook execution and export |
@@ -586,6 +594,33 @@ ls -lh "$PYTHON_ROOT/julia-environment-$ENV_ARCH.txt"
     | grep -E '^(jax|numpy|tensorflow|torch|onnx|onnxruntime|pysr|smartsim|smartredis)=='
 ```
 
+### 5.1 Prepare the writable PySR / Julia runtime (once)
+
+The Tykky image is read-only, but `juliapkg` needs to write a lock file into the Julia project directory the first time it's used. Rather than doing this copy on every `source` (as in earlier versions of this guide), it now happens **once**, right after the Tykky build succeeds:
+
+```bash
+echo "Preparing writable PySR / Julia runtime..."
+
+PYTHON_PREFIX="$("$ENV_PREFIX/bin/python" -c 'import sys; print(sys.prefix)')"
+JULIA_ENV_SOURCE="$PYTHON_PREFIX/julia_env"
+JULIA_ENV_RUNTIME="$BASE_SCRATCH/.julia_env_runtime_$ENV_ARCH"
+JULIA_DEPOT_RUNTIME="$BASE_SCRATCH/.julia_depot_runtime_$ENV_ARCH"
+
+if [ ! -d "$JULIA_ENV_SOURCE" ]; then
+    echo "ERROR: Packaged Julia environment was not found: $JULIA_ENV_SOURCE"
+    exit 1
+fi
+
+rm -rf "$JULIA_ENV_RUNTIME"
+cp -a "$JULIA_ENV_SOURCE" "$JULIA_ENV_RUNTIME"
+mkdir -p "$JULIA_DEPOT_RUNTIME"
+
+echo "Julia environment: $JULIA_ENV_RUNTIME"
+echo "Julia depot:       $JULIA_DEPOT_RUNTIME"
+```
+
+Rerun this block (and only this block) if the Tykky environment is rebuilt for this architecture — the packaged Julia project may have changed.
+
 Build the other architecture separately (Section 1 + Section 4).
 
 ---
@@ -594,7 +629,7 @@ Build the other architecture separately (Section 1 + Section 4).
 
 Needed on **both** architectures for OpenFOAM/C++/Fortran linkage — this is a separate CMake build, unrelated to `smart build`/RedisAI or the Julia toolchain.
 
-Request a node (Section 4), then:
+Request a node (Section 4), then set the GCC module for your target system and load compilers:
 
 ```bash
 module purge
@@ -604,7 +639,8 @@ Compilers, e.g. Roihu CPU:
 
 ```bash
 # Roihu CPU
-module load gcc/13.4.0
+export GCC_MODULE="gcc/13.4.0"
+module load "$GCC_MODULE"
 module load cmake/3.26.5
 ```
 
@@ -612,16 +648,27 @@ Roihu GPU:
 
 ```bash
 # Roihu GPU
-module load gcc/13.4.0
+export GCC_MODULE="gcc/13.4.0"
+module load "$GCC_MODULE"
 module load cmake/3.31.11
 ```
 
 or Mahti:
 
 ```bash
-module load gcc/13.1.0
+export GCC_MODULE="gcc/13.1.0"
+module load "$GCC_MODULE"
 module load cmake/3.28.6
 module load git
+```
+
+Record the GCC module for the loader so it never has to guess based on hostname:
+
+```bash
+cat <<EOF > "$PYTHON_ROOT/runtime-$ENV_ARCH.sh"
+export SMARTSIM_GCC_MODULE="$GCC_MODULE"
+EOF
+chmod 600 "$PYTHON_ROOT/runtime-$ENV_ARCH.sh"
 ```
 
 Clone and build:
@@ -663,20 +710,36 @@ ldd "$SMARTREDIS_DIR/install/lib64/libsmartredis-fortran.so"
 
 ## 7. Loader — `Python4SmartSim.sh`
 
-The loader now also handles PySR's Julia runtime: it copies the in-container Julia *project* into a writable scratch directory every time it's sourced, since the Tykky image is read-only and `juliapkg` needs to write a lock file into the project directory. The Julia *depot* (precompiled packages) stays read-only and layered in via a colon-separated `JULIA_DEPOT_PATH`.
+The loader is now a **pure environment loader** — it must be *sourced*, not executed, and re-sourcing it repeatedly in the same shell is safe. It:
 
-The GCC module for the native SmartRedis library also varies by target system — Roihu and Mahti use different compiler versions, so the loader selects one based on hostname rather than hardcoding a single module.
+* validates that the Tykky environment, SmartRedis install, and the writable Julia runtime directories (created once in Sections 5.1/6) all exist;
+* reads `runtime-$ENV_ARCH.sh` to learn which GCC module the native SmartRedis library was built against, and loads it only if not already loaded (`module is-loaded`);
+* prepends to `PATH`, `LD_LIBRARY_PATH`, and `CMAKE_PREFIX_PATH` through a small `path_prepend` helper that skips directories already present, so re-sourcing never creates duplicate entries;
+* never copies, deletes, or installs anything.
 
 ```bash
 cat <<'EOF' > "$BASE_SCRATCH/Python4SmartSim.sh"
 #!/bin/bash
+#
+# SmartSim Python environment loader
+#
+# Usage:
+#   source /scratch/<project>/<user>/Utilities/Python4SmartSim.sh
 
-if [ ! -f "$HOME/.config/csc-hpc/identity.sh" ]; then
-    echo "Identity file not found: $HOME/.config/csc-hpc/identity.sh"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    echo "This file must be sourced, not executed:"
+    echo "    source ${BASH_SOURCE[0]}"
+    exit 1
+fi
+
+IDENTITY_FILE="$HOME/.config/csc-hpc/identity.sh"
+
+if [ ! -f "$IDENTITY_FILE" ]; then
+    echo "Identity file not found: $IDENTITY_FILE"
     return 1
 fi
 
-source "$HOME/.config/csc-hpc/identity.sh"
+source "$IDENTITY_FILE"
 
 export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
 export PYTHON_BASE="$BASE_SCRATCH/Python"
@@ -702,54 +765,77 @@ esac
 export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
 export SMARTREDIS_DIR="$BASE_SCRATCH/SmartRedis-$ENV_ARCH"
 
-# GCC module used to build the native SmartRedis library — this varies by
-# target system, so select it based on hostname rather than hardcoding one.
-case "${HOSTNAME:-}" in
-    *roihu*) module load gcc/13.4.0 ;;
-    *mahti*) module load gcc/13.1.0 ;;
-    *puhti*) echo "Load the GCC module matching your SmartRedis native build before sourcing this loader." ;;
-    *) echo "Unrecognized host — load the GCC module matching your SmartRedis native build before sourcing this loader." ;;
-esac
-
-export PATH="$ENV_PREFIX/bin:$PATH"
-
 if [ ! -x "$ENV_PREFIX/bin/python" ]; then
-    echo "Environment not found for $ENV_ARCH: $ENV_PREFIX"
+    echo "Python environment not found:"
+    echo "    $ENV_PREFIX"
     return 1
 fi
 
-# If lib64 doesn't exist, use lib.
-export LD_LIBRARY_PATH="$SMARTREDIS_DIR/install/lib64:${LD_LIBRARY_PATH:-}"
-export CMAKE_PREFIX_PATH="$SMARTREDIS_DIR/install:${CMAKE_PREFIX_PATH:-}"
+if [ ! -d "$SMARTREDIS_DIR/install" ]; then
+    echo "SmartRedis installation not found:"
+    echo "    $SMARTREDIS_DIR/install"
+    return 1
+fi
+
+RUNTIME_CONFIG="$PYTHON_ROOT/runtime-$ENV_ARCH.sh"
+
+if [ -f "$RUNTIME_CONFIG" ]; then
+    source "$RUNTIME_CONFIG"
+fi
+
+if [ -n "${SMARTSIM_GCC_MODULE:-}" ] && command -v module >/dev/null 2>&1; then
+    module is-loaded "$SMARTSIM_GCC_MODULE" 2>/dev/null ||
+        module load "$SMARTSIM_GCC_MODULE"
+fi
+
+path_prepend() {
+    local variable_name="$1"
+    local directory="$2"
+    local current_value="${!variable_name-}"
+
+    case ":$current_value:" in
+        *":$directory:"*)
+            ;;
+        *)
+            printf -v "$variable_name" '%s' \
+                "$directory${current_value:+:$current_value}"
+            export "$variable_name"
+            ;;
+    esac
+}
+
+if [ -d "$SMARTREDIS_DIR/install/lib64" ]; then
+    export SMARTREDIS_LIB_DIR="$SMARTREDIS_DIR/install/lib64"
+elif [ -d "$SMARTREDIS_DIR/install/lib" ]; then
+    export SMARTREDIS_LIB_DIR="$SMARTREDIS_DIR/install/lib"
+else
+    echo "SmartRedis library directory not found."
+    return 1
+fi
+
+path_prepend PATH "$ENV_PREFIX/bin"
+path_prepend LD_LIBRARY_PATH "$SMARTREDIS_LIB_DIR"
+path_prepend CMAKE_PREFIX_PATH "$SMARTREDIS_DIR/install"
 
 export SMARTSIM_DB_FILE_PARSE_TRIALS=600
 
-# --- PySR / Julia runtime setup ---
-export PYTHON_PREFIX="$(python -c 'import sys; print(sys.prefix)')"
+# PySR / Julia runtime paths — prepared ONCE at build time (Sections 5.1/6);
+# this loader only points environment variables at them.
+export PYTHON_PREFIX="$("$ENV_PREFIX/bin/python" -c 'import sys; print(sys.prefix)')"
 export JULIA_ENV_RUNTIME="$BASE_SCRATCH/.julia_env_runtime_$ENV_ARCH"
 export JULIA_DEPOT_RUNTIME="$BASE_SCRATCH/.julia_depot_runtime_$ENV_ARCH"
 
-python - <<'PY'
-import os
-import shutil
-import sys
-from pathlib import Path
+if [ ! -d "$JULIA_ENV_RUNTIME" ]; then
+    echo "Writable Julia environment not found:"
+    echo "    $JULIA_ENV_RUNTIME"
+    echo "Run the SmartSim installer again for $ENV_ARCH."
+    return 1
+fi
 
-source = Path(sys.prefix) / "julia_env"
-target = Path(os.environ["JULIA_ENV_RUNTIME"])
-
-shutil.rmtree(target, ignore_errors=True)
-shutil.copytree(source, target)
-
-Path(os.environ["JULIA_DEPOT_RUNTIME"]).mkdir(
-    parents=True,
-    exist_ok=True,
-)
-PY
+mkdir -p "$JULIA_DEPOT_RUNTIME"
 
 export PYTHON_JULIAPKG_PROJECT="$JULIA_ENV_RUNTIME"
 export JULIA_DEPOT_PATH="$JULIA_DEPOT_RUNTIME:$PYTHON_PREFIX/julia_depot"
-
 export PYTHON_JULIAPKG_OFFLINE="yes"
 export PYTHON_JULIACALL_THREADS="${SLURM_CPUS_PER_TASK:-auto}"
 
@@ -758,16 +844,18 @@ unset PYTHON_JULIACALL_PROJECT
 
 export JUPYTER_KERNEL_NAME="$ENV_NICKNAME-smartsim-$KERNEL_ARCH"
 export JUPYTER_KERNEL_DISPLAY="Python 3.12 ($ENV_NICKNAME SmartSim $KERNEL_ARCH)"
-export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share/$KERNEL_ARCH}"
-export JUPYTER_KERNEL_DIR="$XDG_DATA_HOME/jupyter/kernels/$JUPYTER_KERNEL_NAME"
+export JUPYTER_KERNEL_DIR="$HOME/.local/share/jupyter/kernels/$JUPYTER_KERNEL_NAME"
 
-echo "ENV_ARCH=$ENV_ARCH"
-echo "PYTHON_ROOT=$PYTHON_ROOT"
-echo "ENV_PREFIX=$ENV_PREFIX"
-echo "SMARTREDIS_DIR=$SMARTREDIS_DIR"
-echo "JAX_PLATFORMS=$JAX_PLATFORMS"
-echo "PYTHON_JULIAPKG_PROJECT=$PYTHON_JULIAPKG_PROJECT"
-echo "JULIA_DEPOT_PATH=$JULIA_DEPOT_PATH"
+if [ "${SMARTSIM_ENV_QUIET:-0}" != "1" ]; then
+    echo "SmartSim Python environment loaded"
+    echo "ENV_ARCH=$ENV_ARCH"
+    echo "ENV_PREFIX=$ENV_PREFIX"
+    echo "SMARTREDIS_DIR=$SMARTREDIS_DIR"
+    echo "JAX_PLATFORMS=$JAX_PLATFORMS"
+    echo "PYTHON_JULIAPKG_PROJECT=$PYTHON_JULIAPKG_PROJECT"
+fi
+
+unset -f path_prepend
 EOF
 chmod +x "$BASE_SCRATCH/Python4SmartSim.sh"
 ```
@@ -780,28 +868,53 @@ echo "$PYTHON_ROOT"; echo "$ENV_PREFIX"; echo "$SMARTREDIS_DIR"
 python --version
 ```
 
+Confirm re-sourcing doesn't duplicate `PATH`:
+
+```bash
+source "$BASE_SCRATCH/Python4SmartSim.sh"
+source "$BASE_SCRATCH/Python4SmartSim.sh"
+echo "$PATH" | tr ':' '\n' | grep PythonSmartSim
+```
+
+The environment path should appear exactly once.
+
+`SMARTSIM_ENV_QUIET=1` suppresses the status banner — used internally by the Jupyter kernel launcher (Section 8).
+
 ---
 
 ## 8. Register the Jupyter Kernel
 
-Run once per architecture. The kernel now also carries the Julia/JuliaCall environment variables so notebooks can use PySR without re-sourcing the loader first.
+Run once per architecture. Rather than baking `ENV_PREFIX` and Julia/JAX environment variables directly into `kernel.json`, the kernel now runs through a small launcher wrapper that sources the exact same loader used interactively — so a notebook kernel always matches a terminal session, including whatever the loader does at that moment.
 
 ```bash
 source "$BASE_SCRATCH/Python4SmartSim.sh"
+
+# --- Kernel launcher wrapper ---
+JUPYTER_KERNEL_LAUNCHER="$PYTHON_ROOT/jupyter-kernel-$ENV_ARCH.sh"
+
+cat <<EOF > "$JUPYTER_KERNEL_LAUNCHER"
+#!/bin/bash
+export SMARTSIM_ENV_QUIET=1
+source "$BASE_SCRATCH/Python4SmartSim.sh" || exit 1
+unset SMARTSIM_ENV_QUIET
+exec "$ENV_PREFIX/bin/python" -m ipykernel_launcher "\$@"
+EOF
+chmod +x "$JUPYTER_KERNEL_LAUNCHER"
+
+# --- kernel.json pointing at the wrapper ---
 mkdir -p "$JUPYTER_KERNEL_DIR"
 
 cat <<EOF > "$JUPYTER_KERNEL_DIR/kernel.json"
 {
-  "argv": ["$ENV_PREFIX/bin/python", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
+  "argv": [
+    "$JUPYTER_KERNEL_LAUNCHER",
+    "-f",
+    "{connection_file}"
+  ],
   "display_name": "$JUPYTER_KERNEL_DISPLAY",
   "language": "python",
-  "metadata": { "debugger": true },
-  "env": {
-    "JAX_PLATFORMS": "$JAX_PLATFORMS",
-    "PYTHON_JULIAPKG_PROJECT": "$PYTHON_JULIAPKG_PROJECT",
-    "JULIA_DEPOT_PATH": "$JULIA_DEPOT_PATH",
-    "PYTHON_JULIAPKG_OFFLINE": "yes",
-    "PYTHON_JULIACALL_THREADS": "auto"
+  "metadata": {
+    "debugger": true
   }
 }
 EOF
@@ -1083,7 +1196,7 @@ smartsim-update pydantic
 smartsim-update loguru pyinstrument
 ```
 
-Updating does **not** rebuild the native SmartRedis library — rebuild that separately (Section 6) if its source, compiler, or ABI changes.
+Updating does **not** rebuild the native SmartRedis library, and does **not** refresh the writable Julia runtime copy under `.julia_env_runtime_$ENV_ARCH` — since `conda-containerize update` repacks the Julia project inside the container, re-run the copy step in Section 5.1 afterwards if PySR's Julia dependencies changed.
 
 ---
 
@@ -1095,13 +1208,15 @@ echo "ENV_ARCH=$ENV_ARCH"; echo "ENV_PREFIX=$ENV_PREFIX"; echo "SMARTREDIS_DIR=$
 
 rm -rf "$ENV_PREFIX" "$TMP_BUILD_DIR"
 mkdir -p "$PYTHON_ROOT/envs" "$TMP_BUILD_DIR"
+# Also clear the writable Julia runtime copy, since it's derived from this build:
+rm -rf "$BASE_SCRATCH/.julia_env_runtime_$ENV_ARCH" "$BASE_SCRATCH/.julia_depot_runtime_$ENV_ARCH"
 # For a full clean install, also: rm -rf "$SMARTREDIS_DIR"
 
 ls -l "$PYTHON_ROOT/base4SmartSim.yml" "$PYTHON_ROOT/requirements.in" "$PYTHON_ROOT/extra4SmartSim.sh"
 chmod +x "$PYTHON_ROOT/extra4SmartSim.sh"
 ```
 
-Request a node (Section 4), then build (Section 5). If you removed `$SMARTREDIS_DIR`, rebuild it too (Section 6).
+Request a node (Section 4), then build (Section 5), followed immediately by the one-time Julia runtime preparation (Section 5.1). If you removed `$SMARTREDIS_DIR`, rebuild it too (Section 6), which also rewrites `runtime-$ENV_ARCH.sh`.
 
 ---
 
@@ -1116,9 +1231,13 @@ Rebuild per Section 12.
 
 **`requirements-$ENV_ARCH.txt` missing** — only written after a successful build; run Section 5.
 
-**PySR tries to download Julia/packages at runtime instead of using the precompiled build** — confirm the loader (Section 7) actually copied `julia_env` into `$JULIA_ENV_RUNTIME` and set `PYTHON_JULIAPKG_OFFLINE=yes`; check `python -c "import os; print(os.environ.get('PYTHON_JULIAPKG_OFFLINE'))"` returns `yes`.
+**PySR tries to download Julia/packages at runtime instead of using the precompiled build** — confirm `$JULIA_ENV_RUNTIME` (Section 5.1) exists and that `PYTHON_JULIAPKG_OFFLINE=yes` is set: `python -c "import os; print(os.environ.get('PYTHON_JULIAPKG_OFFLINE'))"` should print `yes`.
 
-**`OSError: Read-only file system` when importing `pysr`** — the loader's Julia-project copy step didn't run, or the target directory isn't writable. Re-source `Python4SmartSim.sh` and confirm `$JULIA_ENV_RUNTIME` points to a scratch path, not somewhere inside the Tykky image.
+**`OSError: Read-only file system` when importing `pysr`** — the one-time Julia-project copy (Section 5.1) was never run for this architecture, or its target directory was deleted. Re-run Section 5.1, then re-source `Python4SmartSim.sh`; the loader itself no longer performs any copy and will refuse to load if `$JULIA_ENV_RUNTIME` is missing.
+
+**"This file must be sourced, not executed" when running the loader** — run it with `source Python4SmartSim.sh`, not `./Python4SmartSim.sh` or `bash Python4SmartSim.sh`.
+
+**`PATH`/`LD_LIBRARY_PATH` grows every time the loader is sourced** — this should no longer happen; the loader's `path_prepend` helper checks for existing entries before prepending. If it does happen, confirm you're using the updated loader from Section 7, not an older version.
 
 **`git+ ...@csc-develop` install fails** — confirm outbound network access from the build node; confirm the branch name is spelled correctly.
 
@@ -1137,6 +1256,8 @@ Rebuild per Section 12.
 **JAX reports no GPU** — loader sets `JAX_PLATFORMS` automatically; avoid `JAX_PLATFORMS=gpu`.
 
 **SmartRedis native library not found** — check `$LD_LIBRARY_PATH`, confirm files under `install/lib64` (or `lib`), re-source the loader.
+
+**Jupyter kernel doesn't see the same environment as the terminal** — confirm `kernel.json`'s `argv` points at `jupyter-kernel-$ENV_ARCH.sh` (Section 8), not directly at `$ENV_PREFIX/bin/python`; the wrapper sources the loader before launching `ipykernel_launcher`.
 
 **Import errors after an update** — run `uv pip check`; prefer a full rebuild (Section 12) over stacking updates.
 
@@ -1179,10 +1300,12 @@ Full production architecture and Slurm templates: [SmartSim4CSC](https://github.
 * Python 3.12, built separately per architecture — never mix containers across architectures.
 * **This environment is now a superset of the previously standalone ML stack.** It includes everything the ML environment had — including PySR/Julia — plus SmartSim/SmartRedis and RedisAI's TensorFlow/ONNX Runtime/LibTorch backends. A separate `PythonML/` environment is not needed if you use this stack.
 * SmartSim and SmartRedis install from the CSC forks (`PentagonToy/SmartSim`, `PentagonToy/SmartRedis`, `csc-develop` branch), not PyPI — no runtime patching remains in `extra4SmartSim.sh` / `update4SmartSim.sh`.
-* **PySR's Julia dependency is resolved and precompiled at build time**, exactly as in the standalone ML stack: the loader copies the read-only in-container Julia project into a writable scratch directory on every `source`, since `juliapkg` needs to write a lock file there; the Julia depot (precompiled packages) stays read-only and is layered in via `JULIA_DEPOT_PATH`. `PYTHON_JULIAPKG_OFFLINE=yes` prevents any runtime re-download.
+* **PySR's Julia dependency is resolved and precompiled at build time**, exactly as in the standalone ML stack, and the writable runtime copy of the Julia project is now created **once**, immediately after a successful Tykky build (Section 5.1) — not on every `source`. The Julia depot (precompiled packages) stays read-only and is layered in via `JULIA_DEPOT_PATH`. `PYTHON_JULIAPKG_OFFLINE=yes` prevents any runtime re-download.
+* The loader (`Python4SmartSim.sh`) is a **pure loader**: it must be sourced (not executed), is idempotent across repeated sourcing thanks to a `path_prepend` helper, and only loads the GCC module recorded in `runtime-$ENV_ARCH.sh` if it isn't already loaded.
+* Jupyter kernels run through a **launcher wrapper** (`jupyter-kernel-$ENV_ARCH.sh`) that sources the loader before starting `ipykernel_launcher`, so notebook kernels — including under VS Code — always match an interactive terminal session rather than duplicating environment variables inside `kernel.json`.
 * `smart build` runs identically on both architectures and builds all three RedisAI backends by default; `--skip-python-packages` is used because TensorFlow/PyTorch/ONNX Python packages are already managed via `requirements.in`.
 * `jax[cuda12]`, `onnx`, `onnxruntime`, `numpy`, and `protobuf` are intentionally unpinned and resolve to the newest compatible versions at build time. The exact installed versions are recorded in `requirements-$ENV_ARCH.txt` — validate the resolved environment with `uv pip check`.
 * Placeholders (`Harry`/`Dumbledore`/`project_xxxxxxx`) are set once in the identity file (Section 0).
 * `requirements.in` = direct deps, not SmartSim/SmartRedis themselves; `requirements-$ENV_ARCH.txt` = installed-state snapshot, not a lockfile.
 * Every `uv pip install` uses `--link-mode=copy`.
-* The native SmartRedis library (Section 6) is unrelated to `smart build`/RedisAI and the Julia toolchain, and is built on both architectures as usual. The GCC module needed for it varies by target system (Roihu, Mahti, Puhti) — see Section 6/7 rather than assuming one module works everywhere.
+* The native SmartRedis library (Section 6) is unrelated to `smart build`/RedisAI and the Julia toolchain, and is built on both architectures as usual. The GCC module needed for it varies by target system (Roihu, Mahti, Puhti) and is now recorded once in `runtime-$ENV_ARCH.sh` at build time, rather than guessed from hostname at every `source`.
