@@ -2,7 +2,7 @@
 # smartsim-python.sh
 # Interactive installer for the unified Python 3.12 ML + SmartSim/SmartRedis
 # Tykky environment, native SmartRedis library, smartsim-update command,
-# PySR/Julia runtime setup, and Jupyter kernel registration.
+# optional PySR/Julia runtime setup, and Jupyter kernel registration.
 #
 # Intended location:
 #   /scratch/$CSC_PROJECT/$PROJECT_USER_DIR/smartsim-python.sh
@@ -17,6 +17,12 @@
 # Linux ARM64, and the required SmartRedis compiler/source fixes.
 #
 # No post-install source patching is performed.
+#
+# PySR (and its Julia toolchain) is OPTIONAL and is asked about separately
+# for each architecture. Answering "no" skips it entirely: it is left out of
+# requirements.in, no Julia resolve/precompile step runs during the build,
+# no writable Julia runtime is prepared, and the loader never sets up
+# PYTHON_JULIAPKG_PROJECT / JULIA_DEPOT_PATH for that architecture.
 #
 # This script performs installation only. It skips the manual validation,
 # dependency-workflow notes, troubleshooting, and deployment examples from
@@ -133,6 +139,33 @@ prompt_system() {
 }
 
 # ------------------------------------------------------------------
+# PySR / Julia toggle prompt
+# ------------------------------------------------------------------
+prompt_install_pysr() {
+    local value
+
+    while true; do
+        read -r -p "Install PySR (symbolic regression) with its Julia toolchain? [Y/n]: " value
+        value="$(echo "$value" | tr '[:upper:]' '[:lower:]' | xargs)"
+
+        case "$value" in
+            ""|y|yes)
+                INSTALL_PYSR="yes"
+                return
+                ;;
+            n|no)
+                INSTALL_PYSR="no"
+                return
+                ;;
+            *)
+                echo "Invalid choice. Enter y or n."
+                echo
+                ;;
+        esac
+    done
+}
+
+# ------------------------------------------------------------------
 # 1. Collect configuration
 # ------------------------------------------------------------------
 echo "--- Project identity ---"
@@ -154,6 +187,10 @@ prompt_architecture
 echo
 echo "--- Target system ---"
 prompt_system
+
+echo
+echo "--- Optional PySR / Julia toolchain ---"
+prompt_install_pysr
 
 case "$TARGET_SYSTEM" in
     roihu)
@@ -192,7 +229,11 @@ echo "Python            = 3.12"
 echo "SmartSim fork     = PentagonToy/SmartSim @ csc-develop"
 echo "SmartRedis fork   = PentagonToy/SmartRedis @ csc-develop"
 echo "RedisAI backends  = TensorFlow + ONNX Runtime + LibTorch"
-echo "PySR / Julia      = resolved and precompiled during build"
+if [ "$INSTALL_PYSR" = "yes" ]; then
+    echo "PySR / Julia      = resolved and precompiled during build"
+else
+    echo "PySR / Julia      = SKIPPED (INSTALL_PYSR=no)"
+fi
 echo
 
 HOST_ARCH="$(uname -m)"
@@ -244,6 +285,7 @@ echo "[2/10] Setting paths..."
 source "$HOME/.config/csc-hpc/identity.sh"
 
 export ENV_ARCH
+export INSTALL_PYSR
 export BASE_SCRATCH="/scratch/$CSC_PROJECT/$PROJECT_USER_DIR/Utilities"
 export PYTHON_BASE="$BASE_SCRATCH/Python"
 export PYTHON_ROOT="$PYTHON_BASE/PythonSmartSim"
@@ -253,11 +295,20 @@ export TMP_BUILD_DIR="$BASE_SCRATCH/.tykky_runtime_smartsim_$ENV_ARCH"
 
 mkdir -p "$PYTHON_ROOT/envs" "$TMP_BUILD_DIR"
 
+# Persist the PySR toggle for this architecture so later sessions
+# (updates, loader, rebuilds) can recover it without re-asking.
+cat <<EOF > "$PYTHON_ROOT/install-options-$ENV_ARCH.sh"
+export INSTALL_PYSR="$INSTALL_PYSR"
+EOF
+chmod 600 "$PYTHON_ROOT/install-options-$ENV_ARCH.sh"
+
 echo "      ENV_ARCH=$ENV_ARCH"
 echo "      PYTHON_ROOT=$PYTHON_ROOT"
 echo "      ENV_PREFIX=$ENV_PREFIX"
 echo "      SMARTREDIS_DIR=$SMARTREDIS_DIR"
 echo "      TMP_BUILD_DIR=$TMP_BUILD_DIR"
+echo "      INSTALL_PYSR=$INSTALL_PYSR"
+echo "      Recorded: $PYTHON_ROOT/install-options-$ENV_ARCH.sh"
 echo
 
 # ------------------------------------------------------------------
@@ -339,10 +390,6 @@ treeple
 wandb
 xgboost
 
-# --- Symbolic Regression & Julia ---
-pysr
-julia
-
 # --- Hyperparameter Optimisation ---
 optuna
 optuna-dashboard
@@ -417,6 +464,20 @@ tabulate
 typing-extensions
 EOF
 
+# pysr/julia are appended conditionally, based on INSTALL_PYSR, rather than
+# always being present.
+if [ "$INSTALL_PYSR" = "yes" ]; then
+    cat <<'EOF' >> "$PYTHON_ROOT/requirements.in"
+
+# --- Symbolic Regression & Julia ---
+pysr
+julia
+EOF
+    echo "      Added pysr/julia to requirements.in (INSTALL_PYSR=yes)."
+else
+    echo "      Skipped pysr/julia in requirements.in (INSTALL_PYSR=no)."
+fi
+
 cat <<'EOF' > "$PYTHON_ROOT/extra4SmartSim.sh"
 #!/bin/bash
 set -e
@@ -424,6 +485,7 @@ set -e
 : "${CW_BUILD_TMPDIR:?CW_BUILD_TMPDIR is not set}"
 : "${PYTHON_ROOT:?PYTHON_ROOT is not set}"
 : "${ENV_ARCH:?ENV_ARCH is not set}"
+: "${INSTALL_PYSR:=yes}"
 
 export TMPDIR="$CW_BUILD_TMPDIR"
 export PIP_CACHE_DIR="$CW_BUILD_TMPDIR/.pip_cache"
@@ -439,15 +501,18 @@ uv pip install \
     --link-mode=copy \
     --requirements "$PYTHON_ROOT/requirements.in"
 
-# Resolve and precompile PySR's Julia dependency using the actual
-# in-container Python prefix.
-PYTHON_PREFIX="$(python -c 'import sys; print(sys.prefix)')"
-export JULIA_DEPOT_PATH="$PYTHON_PREFIX/julia_depot"
-export PYTHON_JULIAPKG_PROJECT="$PYTHON_PREFIX/julia_env"
+if [ "$INSTALL_PYSR" = "yes" ]; then
+    echo "INSTALL_PYSR=yes - resolving and precompiling PySR's Julia dependency..."
 
-mkdir -p "$JULIA_DEPOT_PATH" "$PYTHON_JULIAPKG_PROJECT"
+    # Resolve and precompile PySR's Julia dependency using the actual
+    # in-container Python prefix.
+    PYTHON_PREFIX="$(python -c 'import sys; print(sys.prefix)')"
+    export JULIA_DEPOT_PATH="$PYTHON_PREFIX/julia_depot"
+    export PYTHON_JULIAPKG_PROJECT="$PYTHON_PREFIX/julia_env"
 
-python - <<'PY'
+    mkdir -p "$JULIA_DEPOT_PATH" "$PYTHON_JULIAPKG_PROJECT"
+
+    python - <<'PY'
 import juliapkg
 
 juliapkg.resolve()
@@ -456,13 +521,13 @@ print(f"Julia executable: {juliapkg.executable()}")
 print(f"Julia project:    {juliapkg.project()}")
 PY
 
-python - <<'PY'
+    python - <<'PY'
 import pysr
 
 print(f"PySR version: {pysr.__version__}")
 PY
 
-python - <<'PY'
+    python - <<'PY'
 import subprocess
 import juliapkg
 
@@ -485,6 +550,9 @@ subprocess.run(
     check=True,
 )
 PY
+else
+    echo "INSTALL_PYSR=no - skipping PySR/Julia resolve and precompile."
+fi
 
 # Install SmartRedis and SmartSim from the CSC-maintained forks.
 uv pip install \
@@ -517,7 +585,8 @@ python -m pip list --format=freeze \
     | sort \
     > "$PYTHON_ROOT/requirements-$ENV_ARCH.txt"
 
-python - <<'PY' > "$PYTHON_ROOT/julia-environment-$ENV_ARCH.txt"
+if [ "$INSTALL_PYSR" = "yes" ]; then
+    python - <<'PY' > "$PYTHON_ROOT/julia-environment-$ENV_ARCH.txt"
 import subprocess
 import juliapkg
 
@@ -537,6 +606,10 @@ subprocess.run(
     check=True,
 )
 PY
+else
+    echo "PySR/Julia was not installed (INSTALL_PYSR=no)." \
+        > "$PYTHON_ROOT/julia-environment-$ENV_ARCH.txt"
+fi
 
 rm -rf "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
 EOF
@@ -558,6 +631,7 @@ module load tykky
 
 export TMPDIR="$TMP_BUILD_DIR"
 export CW_BUILD_TMPDIR="$TMP_BUILD_DIR"
+export INSTALL_PYSR
 
 rm -rf "$ENV_PREFIX" "$TMP_BUILD_DIR"
 mkdir -p "$TMP_BUILD_DIR"
@@ -568,39 +642,39 @@ conda-containerize new \
     "$PYTHON_ROOT/base4SmartSim.yml"
 
 echo
-echo "      Tykky environment built:"
+echo "      Tykky environment built (INSTALL_PYSR=$INSTALL_PYSR):"
 ls -ld "$ENV_PREFIX"
 ls -lh "$PYTHON_ROOT/requirements-$ENV_ARCH.txt"
 ls -lh "$PYTHON_ROOT/julia-environment-$ENV_ARCH.txt"
 echo
 
 # ------------------------------------------------------------------
-# 5b. Prepare writable PySR / Julia runtime once
+# 5b. Prepare writable PySR / Julia runtime once (only if INSTALL_PYSR=yes)
 # ------------------------------------------------------------------
-echo "      Preparing writable PySR / Julia runtime..."
+if [ "$INSTALL_PYSR" = "yes" ]; then
+    echo "      Preparing writable PySR / Julia runtime..."
 
-PYTHON_PREFIX="$("$ENV_PREFIX/bin/python" -c 'import sys; print(sys.prefix)')"
-JULIA_ENV_SOURCE="$PYTHON_PREFIX/julia_env"
-JULIA_ENV_RUNTIME="$BASE_SCRATCH/.julia_env_runtime_$ENV_ARCH"
-JULIA_DEPOT_RUNTIME="$BASE_SCRATCH/.julia_depot_runtime_$ENV_ARCH"
+    PYTHON_PREFIX="$("$ENV_PREFIX/bin/python" -c 'import sys; print(sys.prefix)')"
+    JULIA_ENV_SOURCE="$PYTHON_PREFIX/julia_env"
+    JULIA_ENV_RUNTIME="$BASE_SCRATCH/.julia_env_runtime_$ENV_ARCH"
+    JULIA_DEPOT_RUNTIME="$BASE_SCRATCH/.julia_depot_runtime_$ENV_ARCH"
 
-if [ ! -d "$JULIA_ENV_SOURCE" ]; then
-    echo "ERROR: Packaged Julia environment was not found:"
-    echo "       $JULIA_ENV_SOURCE"
-    exit 1
+    if [ ! -d "$JULIA_ENV_SOURCE" ]; then
+        echo "ERROR: Packaged Julia environment was not found:"
+        echo "       $JULIA_ENV_SOURCE"
+        exit 1
+    fi
+
+    rm -rf "$JULIA_ENV_RUNTIME"
+    cp -a "$JULIA_ENV_SOURCE" "$JULIA_ENV_RUNTIME"
+    mkdir -p "$JULIA_DEPOT_RUNTIME"
+
+    echo "      Julia environment: $JULIA_ENV_RUNTIME"
+    echo "      Julia depot:       $JULIA_DEPOT_RUNTIME"
+else
+    echo "      INSTALL_PYSR=no - skipping writable Julia runtime preparation."
+    rm -rf "$BASE_SCRATCH/.julia_env_runtime_$ENV_ARCH" "$BASE_SCRATCH/.julia_depot_runtime_$ENV_ARCH"
 fi
-
-rm -rf "$JULIA_ENV_RUNTIME"
-cp -a "$JULIA_ENV_SOURCE" "$JULIA_ENV_RUNTIME"
-mkdir -p "$JULIA_DEPOT_RUNTIME"
-
-cat <<EOF > "$PYTHON_ROOT/runtime-$ENV_ARCH.sh"
-export SMARTSIM_GCC_MODULE="$GCC_MODULE"
-EOF
-chmod 600 "$PYTHON_ROOT/runtime-$ENV_ARCH.sh"
-
-echo "      Julia environment: $JULIA_ENV_RUNTIME"
-echo "      Julia depot:       $JULIA_DEPOT_RUNTIME"
 echo
 
 # ------------------------------------------------------------------
@@ -619,6 +693,14 @@ fi
 echo "      Loaded $GCC_MODULE"
 echo "      Loaded $CMAKE_MODULE"
 echo
+
+# Record the GCC module and the PySR-enabled flag for the loader so it
+# never has to guess.
+cat <<EOF > "$PYTHON_ROOT/runtime-$ENV_ARCH.sh"
+export SMARTSIM_GCC_MODULE="$GCC_MODULE"
+export SMARTSIM_PYSR_ENABLED="$INSTALL_PYSR"
+EOF
+chmod 600 "$PYTHON_ROOT/runtime-$ENV_ARCH.sh"
 
 echo "[6/10] Building the native SmartRedis library..."
 
@@ -733,6 +815,10 @@ if [ -f "$RUNTIME_CONFIG" ]; then
     source "$RUNTIME_CONFIG"
 fi
 
+# Default to "yes" for backward compatibility with environments built
+# before this flag existed (they always installed PySR/Julia).
+: "${SMARTSIM_PYSR_ENABLED:=yes}"
+
 if [ -n "${SMARTSIM_GCC_MODULE:-}" ] && command -v module >/dev/null 2>&1; then
     module is-loaded "$SMARTSIM_GCC_MODULE" 2>/dev/null ||
         module load "$SMARTSIM_GCC_MODULE"
@@ -769,27 +855,37 @@ path_prepend CMAKE_PREFIX_PATH "$SMARTREDIS_DIR/install"
 
 export SMARTSIM_DB_FILE_PARSE_TRIALS=600
 
-# PySR / Julia runtime paths.
 export PYTHON_PREFIX="$("$ENV_PREFIX/bin/python" -c 'import sys; print(sys.prefix)')"
-export JULIA_ENV_RUNTIME="$BASE_SCRATCH/.julia_env_runtime_$ENV_ARCH"
-export JULIA_DEPOT_RUNTIME="$BASE_SCRATCH/.julia_depot_runtime_$ENV_ARCH"
 
-if [ ! -d "$JULIA_ENV_RUNTIME" ]; then
-    echo "Writable Julia environment not found:"
-    echo "    $JULIA_ENV_RUNTIME"
-    echo "Run the SmartSim installer again for $ENV_ARCH."
-    return 1
+if [ "$SMARTSIM_PYSR_ENABLED" = "yes" ]; then
+    # PySR / Julia runtime paths - prepared ONCE at build time; this loader
+    # only points environment variables at them.
+    export JULIA_ENV_RUNTIME="$BASE_SCRATCH/.julia_env_runtime_$ENV_ARCH"
+    export JULIA_DEPOT_RUNTIME="$BASE_SCRATCH/.julia_depot_runtime_$ENV_ARCH"
+
+    if [ ! -d "$JULIA_ENV_RUNTIME" ]; then
+        echo "Writable Julia environment not found:"
+        echo "    $JULIA_ENV_RUNTIME"
+        echo "Run the SmartSim installer again for $ENV_ARCH."
+        return 1
+    fi
+
+    mkdir -p "$JULIA_DEPOT_RUNTIME"
+
+    export PYTHON_JULIAPKG_PROJECT="$JULIA_ENV_RUNTIME"
+    export JULIA_DEPOT_PATH="$JULIA_DEPOT_RUNTIME:$PYTHON_PREFIX/julia_depot"
+    export PYTHON_JULIAPKG_OFFLINE="yes"
+    export PYTHON_JULIACALL_THREADS="${SLURM_CPUS_PER_TASK:-auto}"
+
+    unset PYTHON_JULIACALL_EXE
+    unset PYTHON_JULIACALL_PROJECT
+else
+    # This architecture was built with INSTALL_PYSR=no - make sure no
+    # stale Julia environment variables leak in from a previous session.
+    unset JULIA_ENV_RUNTIME JULIA_DEPOT_RUNTIME
+    unset PYTHON_JULIAPKG_PROJECT JULIA_DEPOT_PATH PYTHON_JULIAPKG_OFFLINE
+    unset PYTHON_JULIACALL_THREADS PYTHON_JULIACALL_EXE PYTHON_JULIACALL_PROJECT
 fi
-
-mkdir -p "$JULIA_DEPOT_RUNTIME"
-
-export PYTHON_JULIAPKG_PROJECT="$JULIA_ENV_RUNTIME"
-export JULIA_DEPOT_PATH="$JULIA_DEPOT_RUNTIME:$PYTHON_PREFIX/julia_depot"
-export PYTHON_JULIAPKG_OFFLINE="yes"
-export PYTHON_JULIACALL_THREADS="${SLURM_CPUS_PER_TASK:-auto}"
-
-unset PYTHON_JULIACALL_EXE
-unset PYTHON_JULIACALL_PROJECT
 
 export JUPYTER_KERNEL_NAME="$ENV_NICKNAME-smartsim-$KERNEL_ARCH"
 export JUPYTER_KERNEL_DISPLAY="Python 3.12 ($ENV_NICKNAME SmartSim $KERNEL_ARCH)"
@@ -801,7 +897,10 @@ if [ "${SMARTSIM_ENV_QUIET:-0}" != "1" ]; then
     echo "ENV_PREFIX=$ENV_PREFIX"
     echo "SMARTREDIS_DIR=$SMARTREDIS_DIR"
     echo "JAX_PLATFORMS=$JAX_PLATFORMS"
-    echo "PYTHON_JULIAPKG_PROJECT=$PYTHON_JULIAPKG_PROJECT"
+    echo "SMARTSIM_PYSR_ENABLED=$SMARTSIM_PYSR_ENABLED"
+    if [ "$SMARTSIM_PYSR_ENABLED" = "yes" ]; then
+        echo "PYTHON_JULIAPKG_PROJECT=$PYTHON_JULIAPKG_PROJECT"
+    fi
 fi
 
 unset -f path_prepend
@@ -821,6 +920,7 @@ set -e
 : "${CW_BUILD_TMPDIR:?CW_BUILD_TMPDIR is not set}"
 : "${PYTHON_ROOT:?PYTHON_ROOT is not set}"
 : "${ENV_ARCH:?ENV_ARCH is not set}"
+: "${INSTALL_PYSR:=yes}"
 
 export TMPDIR="$CW_BUILD_TMPDIR"
 export PIP_CACHE_DIR="$CW_BUILD_TMPDIR/.pip_cache"
@@ -847,12 +947,13 @@ if [ -s "$UPDATE_REQUEST" ]; then
         "${UPDATE_PACKAGES[@]}"
 fi
 
-# Keep the packaged Julia environment ready for PySR.
-PYTHON_PREFIX="$(python -c 'import sys; print(sys.prefix)')"
-export JULIA_DEPOT_PATH="$PYTHON_PREFIX/julia_depot"
-export PYTHON_JULIAPKG_PROJECT="$PYTHON_PREFIX/julia_env"
+if [ "$INSTALL_PYSR" = "yes" ]; then
+    # Keep the packaged Julia environment ready for PySR.
+    PYTHON_PREFIX="$(python -c 'import sys; print(sys.prefix)')"
+    export JULIA_DEPOT_PATH="$PYTHON_PREFIX/julia_depot"
+    export PYTHON_JULIAPKG_PROJECT="$PYTHON_PREFIX/julia_env"
 
-python - <<'PY'
+    python - <<'PY'
 import juliapkg
 import pysr
 
@@ -862,7 +963,7 @@ print(f"PySR version:     {pysr.__version__}")
 print(f"Julia executable: {juliapkg.executable()}")
 PY
 
-python - <<'PY'
+    python - <<'PY'
 import subprocess
 import juliapkg
 
@@ -879,6 +980,9 @@ subprocess.run(
     check=True,
 )
 PY
+else
+    echo "INSTALL_PYSR=no - skipping Julia/PySR maintenance during update."
+fi
 
 uv pip install \
     --link-mode=copy \
@@ -958,6 +1062,11 @@ export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
 export TMP_BUILD_DIR="$BASE_SCRATCH/.tykky_runtime_smartsim_$ENV_ARCH"
 export UPDATE_REQUEST="$PYTHON_ROOT/.smartsim-update-$ENV_ARCH.txt"
 
+if [ -f "$PYTHON_ROOT/install-options-$ENV_ARCH.sh" ]; then
+    source "$PYTHON_ROOT/install-options-$ENV_ARCH.sh"
+fi
+export INSTALL_PYSR="${INSTALL_PYSR:-yes}"
+
 if [ ! -d "$ENV_PREFIX" ]; then
     echo "Environment not found: $ENV_PREFIX"
     exit 1
@@ -975,6 +1084,13 @@ for package in "$@"; do
         smartsim|smartredis)
             echo "$package_name is managed separately and must not be added to requirements.in."
             exit 1
+            ;;
+        pysr|julia)
+            if [ "$INSTALL_PYSR" != "yes" ]; then
+                echo "$package_name requires INSTALL_PYSR=yes for this architecture ($ENV_ARCH)."
+                echo "Edit $PYTHON_ROOT/install-options-$ENV_ARCH.sh and do a full rebuild instead."
+                exit 1
+            fi
             ;;
     esac
 done
@@ -1107,11 +1223,18 @@ echo "    JAX + Equinox"
 echo "    TensorFlow 2.18.1"
 echo "    PyTorch 2.7.1"
 echo "    ONNX + ONNX Runtime"
-echo "    PySR + JuliaCall"
+if [ "$INSTALL_PYSR" = "yes" ]; then
+    echo "    PySR + JuliaCall"
+else
+    echo "    PySR + JuliaCall: SKIPPED (INSTALL_PYSR=no for $ENV_ARCH)"
+fi
 echo "    SmartSim + SmartRedis CSC forks"
 echo "    RedisAI TensorFlow + ONNX Runtime + LibTorch backends"
 echo
 echo "No SmartSim or SmartRedis source patching was applied."
 echo
 echo "Run the script again on the other architecture when both x64 and"
-echo "arm64 environments are required. Use the same identity values."
+echo "arm64 environments are required. Each architecture asks for its own"
+echo "PySR/Julia choice, and it is recorded in:"
+echo "    $PYTHON_ROOT/install-options-$ENV_ARCH.sh"
+echo "Use the same identity values."
