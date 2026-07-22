@@ -11,7 +11,7 @@
 #   - x64:   Roihu CPU / Puhti / Mahti x86_64 node
 #   - arm64: Roihu GPU aarch64 node
 #
-# SmartSim and SmartRedis install from the CSC-maintained csc-develop forks.
+# SmartSim and SmartRedis install from the CSC-maintained v1.0.0-csc releases.
 # These forks already include Python 3.12 support, NumPy 2.x compatibility,
 # Linux ARM64 support, RedisAI TensorFlow/ONNX Runtime/LibTorch backends on
 # Linux ARM64, and the required SmartRedis compiler/source fixes.
@@ -226,9 +226,9 @@ echo "TARGET_SYSTEM     = $TARGET_SYSTEM"
 echo "GCC_MODULE        = $GCC_MODULE"
 echo "CMAKE_MODULE      = $CMAKE_MODULE"
 echo "Python            = 3.12"
-echo "SmartSim fork     = PentagonToy/SmartSim @ csc-develop"
-echo "SmartRedis fork   = PentagonToy/SmartRedis @ csc-develop"
-echo "RedisAI backends  = TensorFlow + ONNX Runtime + LibTorch"
+echo "SmartSim release  = PentagonToy/SmartSim @ v1.0.0-csc"
+echo "SmartRedis release= PentagonToy/SmartRedis @ v1.0.0-csc"
+echo "RedisAI backends  = TensorFlow + ONNX Runtime + LibTorch + JAX"
 if [ "$INSTALL_PYSR" = "yes" ]; then
     echo "PySR / Julia      = resolved and precompiled during build"
 else
@@ -557,11 +557,11 @@ fi
 # Install SmartRedis and SmartSim from the CSC-maintained forks.
 uv pip install \
     --link-mode=copy \
-    "smartredis @ git+https://github.com/PentagonToy/SmartRedis.git@csc-develop"
+    "smartredis @ git+https://github.com/PentagonToy/SmartRedis.git@v1.0.0-csc"
 
 uv pip install \
     --link-mode=copy \
-    "smartsim @ git+https://github.com/PentagonToy/SmartSim.git@csc-develop"
+    "smartsim @ git+https://github.com/PentagonToy/SmartSim.git@v1.0.0-csc"
 
 # Build Redis and all RedisAI backends on both architectures.
 export USE_SYSTEMD=no
@@ -708,7 +708,7 @@ cd "$BASE_SCRATCH"
 rm -rf "$SMARTREDIS_DIR"
 
 git clone \
-    --branch csc-develop \
+    --branch v1.0.0-csc \
     https://github.com/PentagonToy/SmartRedis.git \
     "$SMARTREDIS_DIR"
 
@@ -986,11 +986,11 @@ fi
 
 uv pip install \
     --link-mode=copy \
-    "smartredis @ git+https://github.com/PentagonToy/SmartRedis.git@csc-develop"
+    "smartredis @ git+https://github.com/PentagonToy/SmartRedis.git@v1.0.0-csc"
 
 uv pip install \
     --link-mode=copy \
-    "smartsim @ git+https://github.com/PentagonToy/SmartSim.git@csc-develop"
+    "smartsim @ git+https://github.com/PentagonToy/SmartSim.git@v1.0.0-csc"
 
 export USE_SYSTEMD=no
 
@@ -1229,7 +1229,7 @@ else
     echo "    PySR + JuliaCall: SKIPPED (INSTALL_PYSR=no for $ENV_ARCH)"
 fi
 echo "    SmartSim + SmartRedis CSC forks"
-echo "    RedisAI TensorFlow + ONNX Runtime + LibTorch backends"
+echo "    RedisAI TensorFlow + ONNX Runtime + LibTorch + JAX backends"
 echo
 echo "No SmartSim or SmartRedis source patching was applied."
 echo
