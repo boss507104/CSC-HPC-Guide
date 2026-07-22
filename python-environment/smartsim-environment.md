@@ -59,7 +59,7 @@ A Tykky container built for one architecture will not run on the other. The **Sm
 
 ```text
 Python        3.12
-SmartSim      1.0.1+csc (PentagonToy/SmartSim @ v1.0.3-csc)
+SmartSim      1.0.3+csc (PentagonToy/SmartSim @ v1.0.3-csc)
 SmartRedis    1.0.0+csc (PentagonToy/SmartRedis @ v1.0.0-csc)
 JAX           resolved at build time (CUDA 12 on arm64)
 TensorFlow    2.18.1
@@ -278,7 +278,7 @@ The `.julia_env_runtime_*` / `.julia_depot_runtime_*` directories, `runtime-$ENV
 | --- | --- | --- |
 | Python | 3.12 | Base interpreter |
 | uv | latest at build | Resolution, installation, `uv pip check` |
-| SmartSim | `1.0.1+csc` (`PentagonToy/SmartSim @ v1.0.3-csc`) | Orchestration; Redis, RedisAI, and JAX worker lifecycle |
+| SmartSim | `1.0.3+csc` (`PentagonToy/SmartSim @ v1.0.3-csc`) | Orchestration; Redis, RedisAI, and JAX worker lifecycle |
 | SmartRedis | `1.0.0+csc` (`PentagonToy/SmartRedis @ v1.0.0-csc`) | Python client with direct JAX/Equinox registration + native C++/Fortran library |
 | JAX / Equinox / distrax / distreqx | resolved at build time; CUDA 12 on arm64 | Autodiff / training / inference / probabilistic modelling |
 | TensorFlow | 2.18.1 | Python framework + source for the RedisAI TensorFlow backend |
