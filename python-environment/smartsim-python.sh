@@ -420,7 +420,6 @@ dvc
 
 # --- Custom Utilities ---
 DataGraph @ git+https://github.com/PentagonToy/DataGraph.git#subdirectory=DataGraph
-eqx_io @ git+https://github.com/PentagonToy/CSC-HPC-Guide.git#subdirectory=utilities/eqx4smartredis
 
 # --- Notebook Execution ---
 ipykernel
