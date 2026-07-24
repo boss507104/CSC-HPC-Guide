@@ -784,6 +784,14 @@ if [ "$BUILD_OPENFOAM" = "yes" ]; then
     export FOAM_USER_APPBIN="$OPENFOAM_USER_DIR/platforms/$WM_OPTIONS/bin"
     export FOAM_USER_LIBBIN="$OPENFOAM_USER_DIR/platforms/$WM_OPTIONS/lib"
 
+    if [ -d "$SMARTREDIS_DIR/install/lib64" ]; then
+        SMARTREDIS_LIB_DIR="$SMARTREDIS_DIR/install/lib64"
+    else
+        SMARTREDIS_LIB_DIR="$SMARTREDIS_DIR/install/lib"
+    fi
+
+    export LD_LIBRARY_PATH="$SMARTREDIS_LIB_DIR:$FOAM_USER_LIBBIN${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
     echo
     echo "      OpenFOAM integration installed:"
     echo "      FOAM_USER_APPBIN=$FOAM_USER_APPBIN"
@@ -979,10 +987,10 @@ if [ "${SMARTSIM_ENV_QUIET:-0}" != "1" ]; then
     echo "SMARTREDIS_DIR=$SMARTREDIS_DIR"
     echo "JAX_PLATFORMS=$JAX_PLATFORMS"
     echo "SMARTSIM_PYSR_ENABLED=$SMARTSIM_PYSR_ENABLED"
-echo "SMARTSIM_OPENFOAM_ENABLED=$SMARTSIM_OPENFOAM_ENABLED"
-if [ "$SMARTSIM_OPENFOAM_ENABLED" = "yes" ]; then
-    echo "OPENFOAM_USER_DIR=$OPENFOAM_USER_DIR"
-fi
+    echo "SMARTSIM_OPENFOAM_ENABLED=$SMARTSIM_OPENFOAM_ENABLED"
+    if [ "$SMARTSIM_OPENFOAM_ENABLED" = "yes" ]; then
+        echo "OPENFOAM_USER_DIR=$OPENFOAM_USER_DIR"
+    fi
     if [ "$SMARTSIM_PYSR_ENABLED" = "yes" ]; then
         echo "PYTHON_JULIAPKG_PROJECT=$PYTHON_JULIAPKG_PROJECT"
     fi
@@ -1294,8 +1302,12 @@ if [ "$BUILD_OPENFOAM" = "yes" ]; then
     echo "To use the OpenFOAM integration in a new shell:"
     echo "    module --force purge"
     echo "    source \"$BASE_SCRATCH/Python4SmartSim.sh\""
-    echo "    module load gcc/15.2.0 openmpi/5.0.10 openfoam/2412"
     echo "    export FOAM_USER_DIR=\"$OPENFOAM_USER_DIR\""
+    echo "    module load gcc/15.2.0 openmpi/5.0.10 openfoam/2412"
+    echo "    export FOAM_USER_APPBIN=\"\$FOAM_USER_DIR/platforms/\$WM_OPTIONS/bin\""
+    echo "    export FOAM_USER_LIBBIN=\"\$FOAM_USER_DIR/platforms/\$WM_OPTIONS/lib\""
+    echo "    export PATH=\"\$FOAM_USER_APPBIN:\$PATH\""
+    echo "    export LD_LIBRARY_PATH=\"\$FOAM_USER_LIBBIN\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}\""
     echo "Do not source Python4SmartSim.sh again after loading OpenFOAM."
     echo
 fi
