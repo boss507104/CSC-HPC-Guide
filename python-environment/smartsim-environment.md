@@ -16,7 +16,7 @@ Last updated: 24 July 2026
 
 ## Overview & Motivation
 
-This folder deploys a **unified ML + SmartSim/SmartRedis stack on CSC's Roihu supercomputer only** — **JAX + Equinox + TensorFlow + PyTorch + ONNX + SmartSim + SmartRedis**, with **PySR (JuliaCall)** available as an **optional** add-on, all in one environment. The same SmartSim-CSC checkout also contains an independently maintained OpenFOAM integration for OpenFOAM.com v2412 on Roihu x86_64 CPU nodes. Puhti and Mahti are no longer targets of this guide.
+This folder deploys a **unified ML + SmartSim/SmartRedis stack on CSC's Roihu supercomputer only** — **JAX + Equinox + TensorFlow + PyTorch + ONNX + SmartSim + SmartRedis + FoamPilot CSC**, with **PySR (JuliaCall)** available as an **optional** add-on, all in one environment. The same SmartSim-CSC checkout also contains an independently maintained OpenFOAM integration for OpenFOAM.com v2412 on Roihu x86_64 CPU nodes. Puhti and Mahti are no longer targets of this guide.
 
 The target architecture is **auto-detected** from the node you run the installer on:
 
@@ -67,6 +67,7 @@ SmartSim         1.0.0+csc
 SmartRedis       1.0.0+csc
 RedisAI          1.2.7, backends: onnxruntime + jax (per stack.toml)
 OpenFOAM         v2412 integration validated on Roihu x86_64 CPU
+FoamPilot CSC    0.1.2 (`pip install foampilot-csc`, import package `foampilot`)
 JAX              installed by SmartSim-CSC's install.sh, not requirements.in
 TensorFlow       2.18.1  (Python package only, not a RedisAI backend)
 PyTorch          2.7.1   (Python package only, not a RedisAI backend)
@@ -83,7 +84,7 @@ install-options-$ENV_ARCH.sh     Persists INSTALL_PYSR across sessions
 runtime-$ENV_ARCH.sh             GCC/CUDA modules + PySR-enabled flag, read by the loader every source
 ```
 
-Build order: install `uv` → install `requirements.in` (TensorFlow, PyTorch, ONNX, `pysr`/`julia` if enabled) → resolve/precompile Julia+PySR (if enabled) → checkout pinned `SmartSim-CSC` ref → run its `scripts/install.sh` for the detected profile (installs SmartSim + SmartRedis, builds Redis + RedisAI + selected backends, runs `smart validate`) → `uv pip check` → prepare the writable Julia runtime once, if enabled → build the native SmartRedis library from `components/smartredis` and record its GCC/CUDA modules + PySR-enabled flag → optionally build the OpenFOAM v2412 integration on Roihu x86_64 CPU.
+Build order: install `uv` → install `requirements.in` (TensorFlow, PyTorch, ONNX, `pysr`/`julia` if enabled) → resolve/precompile Julia+PySR (if enabled) → checkout pinned `SmartSim-CSC` ref → run its `scripts/install.sh` for the detected profile (installs SmartSim + SmartRedis, builds Redis + RedisAI + selected backends, runs `smart validate`) → install FoamPilot CSC from the same pinned checkout → `uv pip check` → prepare the writable Julia runtime once, if enabled → build the native SmartRedis library from `components/smartredis` and record its GCC/CUDA modules + PySR-enabled flag → optionally build the OpenFOAM v2412 integration on Roihu x86_64 CPU.
 
 ---
 
@@ -172,7 +173,7 @@ export PYTHON_BASE="$BASE_SCRATCH/Python"
 export PYTHON_ROOT="$PYTHON_BASE/PythonSmartSim"
 export ENV_PREFIX="$PYTHON_ROOT/envs/$ENV_NICKNAME-3.12-$ENV_ARCH"
 export SMARTSIM_CSC_REPO="https://github.com/PentagonToy/SmartSim-CSC.git"
-export SMARTSIM_CSC_REF="ee7e8e8"
+export SMARTSIM_CSC_REF="26f42db"
 export SMARTSIM_CSC_DIR="$PYTHON_ROOT/src/SmartSim-CSC"
 export SMARTREDIS_DIR="$BASE_SCRATCH/SmartRedis-$ENV_ARCH"
 export OPENFOAM_USER_DIR="$BASE_SCRATCH/OpenFOAM/OpenFOAM-v2412"
@@ -202,7 +203,7 @@ echo "INSTALL_PYSR=$INSTALL_PYSR  BUILD_OPENFOAM=$BUILD_OPENFOAM"
 echo "SMARTSIM_CSC_REF=$SMARTSIM_CSC_REF"
 ```
 
-> `SMARTSIM_CSC_REF` currently defaults to the validated commit `ee7e8e8`, which includes the OpenFOAM v2412 full-build integration. After these changes are merged and released, replace the commit with the corresponding release tag.
+> `SMARTSIM_CSC_REF` currently defaults to the validated commit `26f42db`, which includes FoamPilot CSC 0.1.2 and the OpenFOAM v2412 runtime-library fix. Replace the commit with a corresponding release tag when one is published.
 
 **Directory layout:**
 
@@ -252,6 +253,7 @@ echo "SMARTSIM_CSC_REF=$SMARTSIM_CSC_REF"
 | SmartRedis | 1.0.0+csc | Python client + native C++/Fortran library; direct JAX/Equinox registration |
 | RedisAI | 1.2.7 | Backends selected per profile: `onnxruntime`, `jax` |
 | OpenFOAM | v2412 | Optional x86_64 integration built from `components/openfoam-smartsim` |
+| FoamPilot CSC | 0.1.2 | Python orchestration layer for OpenFOAM + SmartSim workflows; installed from the pinned SmartSim-CSC checkout |
 | JAX / Equinox / distrax / distreqx | installed by `install.sh` | Autodiff / training / inference |
 | TensorFlow | 2.18.1 | Python framework only — not a RedisAI backend here |
 | PyTorch | 2.7.1 | Python framework only — not a RedisAI backend here |
@@ -513,6 +515,12 @@ PROFILE="$SMARTSIM_CSC_PROFILE" \
 PYTHONNOUSERSITE=1 \
     "$SMARTSIM_CSC_DIR/scripts/install.sh"
 
+# Install FoamPilot from the same pinned SmartSim-CSC checkout.
+uv pip install \
+    --no-deps \
+    --link-mode=copy \
+    "$SMARTSIM_CSC_DIR/components/openfoam-smartsim/python"
+
 # Restore the user-managed ML environment after SmartSim-CSC installation.
 uv pip install \
     --link-mode=copy \
@@ -541,6 +549,8 @@ rm -rf "$PIP_CACHE_DIR" "$UV_CACHE_DIR"
 EOF
 chmod +x "$PYTHON_ROOT/extra4SmartSim.sh"
 ```
+
+FoamPilot CSC is also available from PyPI as `foampilot-csc`, but the Tykky build installs it from the same pinned SmartSim-CSC checkout so its Python API always matches the bundled OpenFOAM integration.
 
 The installer expects `PYTHON`, `SMART`, and `PROFILE` to be provided as environment variables; it reads component paths and the backend list from `stack.toml`, builds Redis + RedisAI + the selected backends, checks Python dependencies, verifies build artifacts, and runs `smart validate` internally.
 
@@ -772,6 +782,61 @@ Validated end-to-end runtime coverage on Roihu `x86_64`:
 
 `svdToFoam` is currently build/link verified; a dedicated end-to-end runtime test remains future work.
 
+### 6.2 Validate FoamPilot CSC
+
+FoamPilot is installed as the PyPI distribution `foampilot-csc`, while its import package is `foampilot`:
+
+```bash
+source "$BASE_SCRATCH/Python4SmartSim.sh"
+
+python - <<'PY'
+import importlib.metadata
+from foampilot import FoamCase
+
+print("foampilot-csc:", importlib.metadata.version("foampilot-csc"))
+print("FoamCase:", FoamCase)
+PY
+```
+
+A validated cavity end-to-end check is:
+
+```python
+from pathlib import Path
+from shutil import copytree, rmtree
+
+from foampilot import FoamCase
+
+source = Path(
+    "/scratch/project_xxxxxxx/PROJECT_USER_DIR/Utilities/Python/"
+    "PythonSmartSim/src/SmartSim-CSC/tests/openfoam/cases/cavity"
+)
+
+case_path = Path("/tmp/foampilot-cavity")
+if case_path.exists():
+    rmtree(case_path)
+
+copytree(source, case_path)
+
+case = FoamCase(case_path)
+case.publish_fields(["p", "U"], dataset_name="cavityFields")
+
+result = case.run(mesh=True)
+
+print("end_time_index:", result.end_time_index)
+print("p shape:", result.field("p").shape)
+print("U shape:", result.field("U").shape)
+```
+
+Validated output:
+
+```text
+end_time_index: 50
+p shape: (400, 1)
+U shape: (400, 3)
+```
+
+`FoamCase.run()` loads the required CSC/OpenFOAM runtime automatically. The package can be imported in a clean Python environment without SmartSim or SmartRedis installed, but actual SmartSim-coupled execution requires the SmartSim-CSC runtime.
+
 ---
 
 ## 7. Loader — `Python4SmartSim.sh`
@@ -933,7 +998,10 @@ Remove an obsolete kernel: `jupyter kernelspec uninstall -f <kernel_name>`.
 source "$BASE_SCRATCH/Python4SmartSim.sh"
 
 python -c "
-import sys, numpy, jax, equinox, tensorflow, torch, onnx, onnxruntime, smartsim, smartredis
+import sys, importlib.metadata
+import numpy, jax, equinox, tensorflow, torch, onnx, onnxruntime, smartsim, smartredis
+from foampilot import FoamCase
+
 print(f'Python:     {sys.version.split()[0]}')
 print(f'NumPy:      {numpy.__version__}')
 print(f'JAX:        {jax.__version__}  backend={jax.default_backend()}  devices={jax.devices()}')
@@ -941,6 +1009,7 @@ print(f'TensorFlow: {tensorflow.__version__}')
 print(f'PyTorch:    {torch.__version__}')
 print(f'SmartSim:   {smartsim.__version__}')
 print(f'SmartRedis: {smartredis.__version__}')
+print(f'FoamPilot:  {importlib.metadata.version("foampilot-csc")}  {FoamCase}')
 "
 
 uv pip check
@@ -983,6 +1052,7 @@ fi
 
 * Edit `requirements.in`, then rebuild/update (Section 11 or 12). Removing a package needs a full rebuild.
 * `jax` itself is intentionally **not** in `requirements.in` — it's installed by SmartSim-CSC's `install.sh` for the selected profile.
+* `foampilot-csc` is intentionally **not** in `requirements.in` — it is installed from the same pinned SmartSim-CSC checkout after the unified stack.
 * `tensorflow`/`torch` stay pinned; ONNX/ONNX Runtime/NumPy resolve at build time. They are plain Python packages here, not RedisAI backends, so their versions don't need to match RedisAI's own build.
 * Flipping `INSTALL_PYSR` requires regenerating `requirements.in` (Section 3.2) and a **full rebuild** (Section 12); `conda-containerize update` alone is not reliable for adding/removing the Julia toolchain.
 
@@ -1047,7 +1117,7 @@ EOF
 chmod +x "$PYTHON_ROOT/update4SmartSim.sh"
 ```
 
-`smartsim-update` updates ordinary Python packages only. It refuses `smartsim`, `smartredis`, `jax`, `jaxlib`, `jax-cuda12-plugin`, and `jax-cuda12-pjrt` because those packages are managed by SmartSim-CSC. It also refuses `pysr`/`julia` when `INSTALL_PYSR=no` for that architecture:
+`smartsim-update` updates ordinary Python packages only. It refuses `smartsim`, `smartredis`, `foampilot-csc`, `jax`, `jaxlib`, `jax-cuda12-plugin`, and `jax-cuda12-pjrt` because those packages are managed by the pinned SmartSim-CSC checkout. It also refuses `pysr`/`julia` when `INSTALL_PYSR=no` for that architecture:
 
 ```bash
 smartsim-update pydantic
@@ -1089,6 +1159,8 @@ If `INSTALL_PYSR` changed, regenerate `requirements.in` (Section 3.2). Build (Se
 **Native SmartRedis build fails with missing source** — confirm `$SMARTSIM_CSC_DIR/components/smartredis` exists; if not, the monorepo checkout (Section 5's `extra4SmartSim.sh` step) didn't complete.
 
 **`smart validate` reports fewer backends than expected** — only `onnxruntime` and `jax` are built by this stack; TensorFlow/LibTorch RedisAI backends are not part of `stack.toml` here.
+
+**`from foampilot import FoamCase` works but `FoamCase.run()` cannot import SmartSim/SmartRedis** — load the CSC runtime first with `source "$BASE_SCRATCH/Python4SmartSim.sh"`. The PyPI package intentionally does not install public `smartsim`/`smartredis` releases because this guide uses the pinned SmartSim-CSC stack.
 
 **`PATH`/`LD_LIBRARY_PATH` grows on repeated sourcing** — shouldn't happen; the loader's `path_prepend` checks for existing entries.
 
@@ -1134,6 +1206,7 @@ client.put_tensor("result", result)
 
 * This guide now targets **Roihu only**; Puhti and Mahti sections have been removed. Architecture is auto-detected from `uname -m`.
 * SmartSim and SmartRedis come from the **[SmartSim-CSC](https://github.com/PentagonToy/SmartSim-CSC)** monorepo (pinned via `SMARTSIM_CSC_REF`), not from separate forks or PyPI.
+* FoamPilot CSC is installed from `components/openfoam-smartsim/python` in the same pinned checkout. Its distribution name is `foampilot-csc`, while Python code imports `foampilot`.
 * The `linux-x64-cpu`, `linux-arm64-cpu`, and `linux-arm64-gpu` profiles are validated. The GPU profile was tested on a Roihu GH200 compute node with CUDA 12.9; runtime validation and workloads require a GPU allocation.
 * Only `onnxruntime` and `jax` RedisAI backends are built; TensorFlow and PyTorch remain regular Python packages, not RedisAI backends.
 * **PySR/Julia is optional**, controlled per architecture by `INSTALL_PYSR`, independent of the SmartSim-CSC stack itself.
